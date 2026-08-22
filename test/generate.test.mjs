@@ -146,6 +146,54 @@ test('entry module is non-trivial (>= 200 bytes) even at routes=1', () => {
   assert.match(body, /import\('\.\/routes\/r0\.jsx'\)/, 'entry must still dynamically import every route');
 });
 
+test('emitted rspack.config.mjs source contains no nondeterministic time/random APIs', () => {
+  // A static string is only actually deterministic if it stays a static
+  // string. Injecting e.g. output.filename: `[id].${Date.now()}.js` would
+  // leave every existing test green (chunk counts, module counts, and file
+  // structure are all unaffected) while making the BUILD nondeterministic
+  // across runs. This is a cheap, build-free first line of defense; see the
+  // real double-build comparison in test/build.test.mjs for the dynamic
+  // check.
+  const dir = mkdtempSync(path.join(process.cwd(), '.tmp-gen-'));
+  try {
+    generateCase(PARAMS, dir);
+    const src = readFileSync(path.join(dir, 'rspack.config.mjs'), 'utf8');
+    assert.doesNotMatch(
+      src,
+      /Math\.random|Date\.now|Date\(|crypto|hrtime/,
+      'config source must not embed a nondeterministic value at generation/import time'
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('rspack.config.mjs does not ship an unverified numeric collapse-factor claim for minSize', () => {
+  // Regression guard for a fabricated measurement: the generator's emitted
+  // comment once claimed minSize 0->2000 "collapsed the chunk count by
+  // roughly 5x", a number that does not reproduce. Re-measured directly
+  // (minSize 0 vs 2000, same case, chunk count before/after) across four
+  // shapes: ~1.54x, ~1.77x, ~1.79x, and ~1.00x (no visible effect) --
+  // nowhere near a consistent 5x, and shape-dependent enough that no single
+  // multiplier is trustworthy. The requirement itself (minSize must stay 0)
+  // is real; only the invented multiplier was not. This guards against
+  // reintroducing ANY unverified "roughly Nx" style claim, not just the
+  // specific old one.
+  const dir = mkdtempSync(path.join(process.cwd(), '.tmp-gen-'));
+  try {
+    generateCase(PARAMS, dir);
+    const src = readFileSync(path.join(dir, 'rspack.config.mjs'), 'utf8');
+    assert.doesNotMatch(
+      src,
+      /roughly\s+\d+(\.\d+)?x/i,
+      'comment must not assert an unverified numeric collapse factor'
+    );
+    assert.match(src, /minSize/, 'comment must still explain why minSize: 0 is required');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('is deterministic: same params produce byte-identical trees', () => {
   const a = mkdtempSync(path.join(process.cwd(), '.tmp-gen-a-'));
   const b = mkdtempSync(path.join(process.cwd(), '.tmp-gen-b-'));

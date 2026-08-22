@@ -299,9 +299,11 @@ export default {
     splitChunks: {
       chunks: 'all',
       // minSize: 0 is required at both levels below. A nonzero minSize
-      // merges small chunks together and silently breaks the chunk-count
-      // dial (measured: raising it from 0 to 2000 on one case collapsed the
-      // chunk count by roughly 5x).
+      // merges small chunks together, silently breaking the chunk-count
+      // identity this generator promises (chunks = cliques + routes + 1).
+      // How much this collapses the chunk count is shape-dependent --
+      // observed effects have ranged from negligible to substantial
+      // depending on the case -- so no single multiplier is asserted here.
       minSize: 0,
       cacheGroups: {
         // The built-in groups must be disabled, or they compete with
