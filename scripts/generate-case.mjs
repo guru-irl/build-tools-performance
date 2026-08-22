@@ -241,6 +241,21 @@ export default Route${r};
 // call site (so bundlers still split one chunk per route) but the file does
 // real work, clearing the 200-byte non-trivial-module floor at any routes
 // count, including routes=1 (a bare `import()` line is ~27 bytes there).
+//
+// The generated file also CALLS mount() at its own top level -- not just
+// defines it. rspack/webpack always retain an entry's full body regardless,
+// but Rollup/Rolldown default to `preserveEntrySignatures: false` for app
+// builds (confirmed by reading vite's own resolved build options), which
+// tree-shakes a module's exports whenever nothing observably uses them. An
+// entry that only defines and exports resolveRoute/dispatch/mount without
+// ever calling any of them has zero top-level side effects, so a real Vite
+// build discarded the entire ROUTES registry -- and every dynamic import()
+// inside it -- as dead code: measured directly, a 400-module/80-chunk case
+// collapsed to exactly 1 emitted chunk of 0 bytes instead of ~80. Calling
+// mount() (which reads ROUTES via Object.keys, forcing the whole object to
+// stay reachable) is what a real app's bootstrap file does anyway -- this
+// is a realism fix, not a bundler-specific workaround, so it belongs here
+// rather than as a special case in either bundler's config.
 export function entryBody(routes) {
   const registry = Array.from({ length: routes }, (_, r) =>
     `  ${r}: () => import('./routes/r${r}.jsx'),`).join('\n');
@@ -273,6 +288,11 @@ export default function mount(root) {
   const checksum = ids.reduce((acc, id) => acc + id, 0);
   return { root, count: ids.length, checksum, dispatch };
 }
+
+// Actually run the entry -- see the comment on entryBody() above for why this
+// call (not just the definitions above it) is required for a real Vite build
+// to keep the route registry instead of tree-shaking it away.
+mount('root');
 `;
 }
 
@@ -331,6 +351,58 @@ export default {
 };
 `;
 
+// Counterpart to RSPACK_CONFIG: same fixed directory layout, same __dirname
+// trick, so it too needs no per-case templating and stays trivially
+// deterministic (a static string, no RNG/Date/crypto).
+//
+// Deliberately NOT configured: manualChunks. Rollup/Rolldown (what Vite
+// builds with) groups modules by reachability signature -- the set of
+// entries/dynamic-import boundaries that reach a module -- which is
+// natively the same clique grouping this generator synthesizes. rspack
+// needs the explicit nameless cacheGroup above to get the same grouping;
+// Vite/Rolldown does not need any equivalent config. That asymmetry is the
+// finding this benchmark measures, so hand-writing a manualChunks function
+// to force Vite's count to match rspack's exactly would destroy the thing
+// being measured. See test/build.test.mjs and
+// .superpowers/sdd/task-5-report.md for the real, measured chunk counts and
+// the tolerance those measurements justify.
+//
+// Also deliberately NOT configured: any JSX/babel/swc transform plugin, and
+// no resolve.extensions override. Generated components call
+// React.createElement directly (see appComponentBody/routeBody/entryBody
+// above) -- there is no JSX syntax anywhere in generated sources -- and
+// '.jsx' is already in Vite's own default resolve.extensions, so nothing
+// needs transforming or reconfiguring to resolve it (confirmed directly: a
+// real build of a generated case resolves and bundles every .jsx file with
+// zero plugins and zero resolve config).
+const VITE_CONFIG = `import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { defineConfig } from 'vite';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig({
+  root: __dirname,
+  build: {
+    // Minification is mandatory, for the same reason as rspack's
+    // optimization.minimize: true above: with it off, per-chunk cost is
+    // understated by orders of magnitude and the benchmark measures the
+    // wrong thing.
+    minify: true,
+    target: 'es2022',
+    // Vite must write real output to disk here, exactly like rspack's
+    // output.clean: true build does (emptyOutDir defaults to true for an
+    // outDir under root, matching that clean). A write: false build would
+    // skip file emission and bias any timing/size comparison against
+    // rspack, which always writes -- so this is explicit, not left to
+    // Vite's (also true) default, to make that requirement unmissable.
+    write: true,
+    outDir: path.join(__dirname, 'dist-vite'),
+    rollupOptions: { input: path.join(__dirname, 'src/index.jsx') },
+  },
+});
+`;
+
 export function generateCase(params, outDir) {
   const shape = computeCaseShape(params);
   const { routes, cliques, modulesPerVendor: k, appModules } = shape;
@@ -380,6 +452,9 @@ export function generateCase(params, outDir) {
 
   // See RSPACK_CONFIG above for why this is a static template.
   writeFileSync(path.join(outDir, 'rspack.config.mjs'), RSPACK_CONFIG);
+  // See VITE_CONFIG above for why this is a static template, and why it has
+  // no manualChunks and no transform plugin.
+  writeFileSync(path.join(outDir, 'vite.config.mjs'), VITE_CONFIG);
 
   return shape;
 }

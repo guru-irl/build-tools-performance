@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { generateCase } from '../scripts/generate-case.mjs';
 import { rspack } from '@rspack/core';
+import { build as viteBuild } from 'vite';
 
 // These tests invoke a REAL rspack build (Node API) on a generated case and
 // read real stats. Tests that only inspect generateCase's own output (file
@@ -275,3 +276,158 @@ test('known shape (400/60/12/4) stays within a coarse absolute dist-size sanity 
   }
 });
 
+// ---------------------------------------------------------------------------
+// Vite: same generated case, no manualChunks, no transform plugin (see
+// VITE_CONFIG's comment in generate-case.mjs for the full rationale). These
+// tests invoke a REAL Vite build (Node API, `build()` from 'vite', which
+// bundles with Rolldown in the installed 8.2.1) on the emitted
+// vite.config.mjs, exactly as `vite build` would load it standalone -- not
+// just an inspection of generateCase's own output.
+// ---------------------------------------------------------------------------
+
+async function loadViteConfig(dir) {
+  const mod = await import(path.join(dir, 'vite.config.mjs'));
+  return mod.default; // defineConfig() is an identity function at runtime
+}
+
+async function buildVite(dir) {
+  const res = await viteBuild({ configFile: path.join(dir, 'vite.config.mjs'), logLevel: 'error' });
+  const out = Array.isArray(res) ? res[0].output : res.output;
+  return out.filter((o) => o.type === 'chunk').length;
+}
+
+// Measured directly in this repo, real builds, minify on, same generateCase
+// output rspack builds elsewhere in this file (see buildCase()'s asserted
+// totals above):
+//   SHAPE_A (cliques 59, routes 20, predicted/rspack 80 chunks): vite 70  -> 87.50%
+//   SHAPE_B (cliques 47, routes 12, predicted/rspack 60 chunks): vite 52  -> 86.67%
+// A from-scratch edge case (targetModules 100, targetChunks 3, routes 1,
+// modulesPerVendor 20 -- predicted/rspack 3 chunks) also measured: vite 2 ->
+// 66.67%. At that scale a single merged chunk swings the ratio enormously
+// (1 chunk out of 3 is a third of the total), so it is deliberately NOT one
+// of the shapes this tolerance is asserted against below -- this generator's
+// real cases target hundreds to thousands of chunks (see the case grid in
+// docs/design/synthetic-chunk-scaling.md), not single digits. A larger case
+// (targetModules 10000, targetChunks 1000, routes 100, modulesPerVendor 4)
+// measured closer to parity: vite 901 / rspack 1000 -> 90.10%. 0.8 sits with
+// real headroom below the lowest of the two asserted-shape measurements
+// (86.67%) without being so loose it would pass the collapsed counts a
+// broken config produces (see the entryBody tree-shaking bug this task found
+// and fixed: 1 chunk instead of ~80 -- 1/80 = 1.25%, nowhere close to 80%).
+const VITE_CHUNK_TOLERANCE = 0.8;
+
+test('vite real build reaches a comparable chunk count with no manual chunk config (targetChunks=80 shape)', async () => {
+  const dir = mkdtempSync(path.join(process.cwd(), '.tmp-build-'));
+  try {
+    const shape = generateCase(SHAPE_A, dir);
+
+    // Lock the mechanism, not just one shape's outcome: no manualChunks (a
+    // manualChunks function that forced rspack's exact number would destroy
+    // the reachability-based finding this comparison exists to measure),
+    // minification genuinely on, output genuinely written to disk, and zero
+    // transform plugins configured.
+    const cfg = await loadViteConfig(dir);
+    assert.equal(cfg.build.minify, true, 'minification must be enabled');
+    assert.equal(cfg.build.write, true, 'vite must write real output to disk, like rspack does');
+    assert.equal(
+      cfg.build.rollupOptions?.output?.manualChunks, undefined,
+      'must not hand-write manualChunks -- that would force agreement by configuration instead of measuring it'
+    );
+    assert.ok(!cfg.plugins || cfg.plugins.length === 0, 'no transform plugin should be configured');
+
+    const viteChunks = await buildVite(dir);
+    const lo = shape.totalChunks * VITE_CHUNK_TOLERANCE;
+    assert.ok(
+      viteChunks >= lo,
+      `vite produced ${viteChunks} chunks for a case whose rspack/predicted total is ${shape.totalChunks}; expected >= ${lo} (${VITE_CHUNK_TOLERANCE * 100}% tolerance)`
+    );
+    // Guards against the exact failure mode this task's own investigation
+    // found: an inert entry (defines routes but never runs) gets entirely
+    // tree-shaken away by Rollup/Rolldown's default preserveEntrySignatures:
+    // false for app builds, collapsing the count to 1. routes is a cheap,
+    // shape-independent floor no real (non-degenerate) build should be at or
+    // under: cliques + routes + 1 is always > routes.
+    assert.ok(
+      viteChunks > shape.routes,
+      `vite chunk count ${viteChunks} looks degenerate (<= route count ${shape.routes})`
+    );
+
+    // CRITICAL requirement: Vite must actually write to disk, not just return
+    // an in-memory bundle (write: false would silently exclude emission from
+    // any later timing/size comparison and bias it against rspack).
+    const written = readdirSync(path.join(dir, 'dist-vite'), { recursive: true })
+      .map((p) => path.join(dir, 'dist-vite', p))
+      .filter((p) => statSync(p).isFile());
+    assert.equal(written.length, viteChunks, 'every reported chunk must be a real file on disk');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('vite real build reaches a comparable chunk count with no manual chunk config (targetChunks=60, a different shape)', async () => {
+  const dir = mkdtempSync(path.join(process.cwd(), '.tmp-build-'));
+  try {
+    const shape = generateCase(SHAPE_B, dir);
+    assert.notEqual(shape.totalChunks, 80, 'fixture sanity: this shape must differ from the other test\'s shape');
+    const viteChunks = await buildVite(dir);
+    const lo = shape.totalChunks * VITE_CHUNK_TOLERANCE;
+    assert.ok(
+      viteChunks >= lo,
+      `vite produced ${viteChunks} chunks for a case whose rspack/predicted total is ${shape.totalChunks}; expected >= ${lo} (${VITE_CHUNK_TOLERANCE * 100}% tolerance)`
+    );
+    assert.ok(
+      viteChunks > shape.routes,
+      `vite chunk count ${viteChunks} looks degenerate (<= route count ${shape.routes})`
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Cross-tool: build the SAME generated case with BOTH bundlers, in the same
+// test, and compare their real chunk counts directly to each other (not each
+// independently to the formula, which the two tests above already do).
+// ---------------------------------------------------------------------------
+
+// Measured directly (same builds cited above): relative difference
+// |vite - rspack| / rspack was 12.5% (SHAPE_A: |70-80|/80) and 13.3% (SHAPE_B:
+// |52-60|/60). 0.2 (20%) sits with real headroom above both measurements --
+// enough to absorb ordinary run-to-run variance (none was observed across 5
+// repeats of the same shape in the same build; see task-5-report.md) without
+// being loose enough to pass a genuinely broken comparison: the historical
+// splitChunks-name regression this repo has already guarded against
+// elsewhere (60 -> 14 chunks) would be a 76.7% relative difference here.
+const CROSS_TOOL_RELATIVE_TOLERANCE = 0.2;
+
+test('cross-tool: rspack and vite chunk counts land within tolerance of each other on the same generated case (targetChunks=80 shape)', async () => {
+  const dir = mkdtempSync(path.join(process.cwd(), '.tmp-build-'));
+  try {
+    const { shape, json } = await buildCase(SHAPE_A, dir);
+    const rspackChunks = json.chunks.length;
+    const viteChunks = await buildVite(dir);
+    const rel = Math.abs(viteChunks - rspackChunks) / rspackChunks;
+    assert.ok(
+      rel <= CROSS_TOOL_RELATIVE_TOLERANCE,
+      `rspack=${rspackChunks} vite=${viteChunks} (predicted ${shape.totalChunks}): relative difference ${(rel * 100).toFixed(1)}% exceeds ${CROSS_TOOL_RELATIVE_TOLERANCE * 100}% tolerance`
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cross-tool: rspack and vite chunk counts land within tolerance of each other on the same generated case (targetChunks=60, a different shape)', async () => {
+  const dir = mkdtempSync(path.join(process.cwd(), '.tmp-build-'));
+  try {
+    const { shape, json } = await buildCase(SHAPE_B, dir);
+    const rspackChunks = json.chunks.length;
+    const viteChunks = await buildVite(dir);
+    const rel = Math.abs(viteChunks - rspackChunks) / rspackChunks;
+    assert.ok(
+      rel <= CROSS_TOOL_RELATIVE_TOLERANCE,
+      `rspack=${rspackChunks} vite=${viteChunks} (predicted ${shape.totalChunks}): relative difference ${(rel * 100).toFixed(1)}% exceeds ${CROSS_TOOL_RELATIVE_TOLERANCE * 100}% tolerance`
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
