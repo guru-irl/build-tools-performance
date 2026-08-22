@@ -538,7 +538,51 @@ test('cross-tool: rspack and vite chunk counts land within tolerance of each oth
 // axes it claims to.
 // ---------------------------------------------------------------------------
 
-test('collision control: N vendors sharing one route subset produce exactly N fewer real chunks than N vendors with distinct subsets, at equal module count', async () => {
+// Mechanism helpers for the collision control below. A chunk-count delta
+// alone cannot distinguish "collision vendors merged into clique 0's own
+// vendor chunk" (the claimed mechanism) from an unrelated way to reach the
+// same numbers -- e.g. collision vendors absorbed into a ROUTE chunk instead
+// (reproduced directly this session: emitting them from src/shared/ instead
+// of src/vendors/, so the cache group's `test` regex never matches them,
+// gives the identical 60 chunks / 440 modules / delta-of-10). These read
+// real chunk MEMBERSHIP and real on-disk bytes, not just counts.
+function chunkIdsForVendor(dir, json, vendorIdx) {
+  const prefix = path.join(dir, `src/vendors/v${vendorIdx}`) + path.sep;
+  const ids = new Set();
+  for (const m of json.modules) {
+    if ((m.nameForCondition || '').startsWith(prefix)) {
+      for (const cid of (m.chunks || [])) ids.add(cid);
+    }
+  }
+  return ids;
+}
+
+// Distinct vendor PACKAGE indices (the `v${N}` directory, not individual
+// files) whose modules land in chunk `chunkId` -- i.e. how many separate
+// vendor packages that chunk actually holds.
+function vendorPackagesInChunk(dir, json, chunkId) {
+  const re = /vendors[\\/]v(\d+)[\\/]/;
+  const found = new Set();
+  for (const m of json.modules) {
+    if (!(m.chunks || []).includes(chunkId)) continue;
+    const rel = (m.nameForCondition || '').slice(dir.length);
+    const match = rel.match(re);
+    if (match) found.add(Number(match[1]));
+  }
+  return found;
+}
+
+// Real bytes on disk for a chunk's emitted file(s) -- mirrors distBytes()
+// above: stats-reported chunk `size` is a pre-minification estimate (measured
+// directly this session: a single-vendor chunk reports stats size 1,448B but
+// is 761B on disk after minification), so only real emitted bytes reflect
+// what this benchmark actually measures.
+function chunkRealBytes(dir, json, chunkId) {
+  const chunk = json.chunks.find((c) => c.id === chunkId);
+  return chunk.files.reduce((n, f) => n + statSync(path.join(dir, 'dist', f)).size, 0);
+}
+
+test('collision control (rspack): N vendors sharing one route subset produce exactly N fewer real rspack chunks than N vendors with distinct subsets, at equal module count', async () => {
   // Two twin cases: same routes, same modulesPerVendor, same total vendor-
   // package count (cliques + collisions), same module budget. The ONLY
   // difference is whether the extra `collisions` vendor packages get their
@@ -550,69 +594,145 @@ test('collision control: N vendors sharing one route subset produce exactly N fe
   // groups by identical consumer-set, so if the mechanism is real, colliding
   // must cost exactly `collisions` fewer chunks than being distinct -- not
   // "roughly fewer", a specific, checkable number.
-  const routes = 12, k = 4, collisions = 10, cliques = 47, targetModules = 440;
-  const distinctParams = {
-    targetModules, targetChunks: cliques + collisions + routes + 1, routes, modulesPerVendor: k,
-  };
-  const collideParams = {
-    targetModules, targetChunks: cliques + routes + 1, routes, modulesPerVendor: k, collisionVendors: collisions,
-  };
+  //
+  // This exact "-N chunks" delta is RSPACK-SPECIFIC (a property of its
+  // nameless splitChunks cache group), not a bundler-independent law -- an
+  // earlier version of this comment stated the delta as if it were general.
+  // Measured directly this session, real builds, the SAME twins (cliques=47,
+  // routes=12, 440 modules, collisions=10) under Vite: rspack goes 70->60
+  // (delta 10, matching `collisions` exactly, the assertion below), Vite
+  // goes 60->52 (delta 8, NOT 10) -- consistent with this file's own
+  // established `vite = rspack - size1cliques + 1` relation (see
+  // VITE_CHUNK_TOLERANCE's comment above), since the two twins have
+  // different size-1-clique counts.
+  //
+  // The BUNDLER-INDEPENDENT invariant is qualitative, not this exact number:
+  // collisionVendors adds vendor modules without adding chunks in EITHER
+  // bundler, just via different mechanisms (rspack's explicit nameless
+  // cache group vs Rolldown's reachability-based grouping merging same-
+  // signature vendors on its own). Measured directly this session, real Vite
+  // builds, at fixed cliques=47/routes=12/440 modules: collisionVendors =
+  // 0, 10, and 25 all produced exactly 52 Vite chunks.
+  //
+  // Checked at TWO collision counts (10 and 20), not one: test/shape.test.mjs
+  // never exercised collisionVendors at all before this fix, and this was the
+  // ONLY real-build collision test, fixed at exactly collisions=10 -- a break
+  // confined to larger counts (e.g. the reviewer's own "don't wire imports
+  // when collisionVendors > 100") is invisible to a single parameter point.
+  // See the fix report for a count-dependent corruption this loop is
+  // specifically designed to catch (RED at collisions=20, GREEN at =10).
+  const routes = 12, k = 4, cliques = 47, targetModules = 440;
+  for (const collisions of [10, 20]) {
+    const distinctParams = {
+      targetModules, targetChunks: cliques + collisions + routes + 1, routes, modulesPerVendor: k,
+    };
+    const collideParams = {
+      targetModules, targetChunks: cliques + routes + 1, routes, modulesPerVendor: k, collisionVendors: collisions,
+    };
 
-  const dirD = mkdtempSync(path.join(process.cwd(), '.tmp-coll-d-'));
-  const dirC = mkdtempSync(path.join(process.cwd(), '.tmp-coll-c-'));
-  try {
-    const shapeD = generateCase(distinctParams, dirD);
-    const shapeC = generateCase(collideParams, dirC);
+    // Both temp dirs are created INSIDE the try (not one before it): if the
+    // SECOND mkdtempSync throws, dirD must still be cleaned up in `finally`,
+    // not leaked. Declared with `let` and guarded in `finally` below so a
+    // throw before either assignment (or between them) never passes an
+    // undefined path to rmSync.
+    let dirD, dirC;
+    try {
+      dirD = mkdtempSync(path.join(process.cwd(), `.tmp-coll-d-${collisions}-`));
+      dirC = mkdtempSync(path.join(process.cwd(), `.tmp-coll-c-${collisions}-`));
+      const shapeD = generateCase(distinctParams, dirD);
+      const shapeC = generateCase(collideParams, dirC);
 
-    // Accounting invariant, checked before any build: collision vendors must
-    // be counted as real vendor modules, identically to giving them distinct
-    // cliques of their own -- not silently dropped. Measured this session
-    // against a computeCaseShape that ignored collisionVendors entirely:
-    // shapeC.vendorModules was 188 (= cliques*k) instead of 228
-    // (= (cliques+collisions)*k, matching the distinct twin) -- and the two
-    // twins' REAL chunk counts already differed by exactly `collisions` even
-    // then (an ordinary 47-clique case next to an ordinary 57-clique case),
-    // so a chunk-count comparison ALONE cannot tell "collisions really merge"
-    // apart from "collisionVendors is a no-op"; this accounting check is what
-    // actually distinguishes them.
-    assert.equal(
-      shapeC.vendorModules, shapeD.vendorModules,
-      `collision vendors must be counted as real vendor modules: distinct twin has ${shapeD.vendorModules}, collide case has ${shapeC.vendorModules}`
-    );
-    assert.equal(shapeC.totalModules, shapeD.totalModules, 'fixture sanity: both twins must share the same module budget');
-    assert.notEqual(
-      shapeD.totalChunks, shapeC.totalChunks,
-      'fixture sanity: the two twins must predict different chunk counts, or this control proves nothing'
-    );
+      // Accounting invariant, checked before any build: collision vendors must
+      // be counted as real vendor modules, identically to giving them distinct
+      // cliques of their own -- not silently dropped. Measured this session
+      // against a computeCaseShape that ignored collisionVendors entirely:
+      // shapeC.vendorModules was 188 (= cliques*k) instead of 228
+      // (= (cliques+collisions)*k, matching the distinct twin) -- and the two
+      // twins' REAL chunk counts already differed by exactly `collisions` even
+      // then (an ordinary 47-clique case next to an ordinary 57-clique case),
+      // so a chunk-count comparison ALONE cannot tell "collisions really merge"
+      // apart from "collisionVendors is a no-op"; this accounting check is what
+      // actually distinguishes them.
+      assert.equal(
+        shapeC.vendorModules, shapeD.vendorModules,
+        `collision vendors must be counted as real vendor modules: distinct twin has ${shapeD.vendorModules}, collide case has ${shapeC.vendorModules}`
+      );
+      assert.equal(shapeC.totalModules, shapeD.totalModules, 'fixture sanity: both twins must share the same module budget');
+      assert.notEqual(
+        shapeD.totalChunks, shapeC.totalChunks,
+        'fixture sanity: the two twins must predict different chunk counts, or this control proves nothing'
+      );
 
-    const jsonD = await runRspack({ ...(await loadConfig(dirD)), context: dirD });
-    const jsonC = await runRspack({ ...(await loadConfig(dirC)), context: dirC });
+      const jsonD = await runRspack({ ...(await loadConfig(dirD)), context: dirD });
+      const jsonC = await runRspack({ ...(await loadConfig(dirC)), context: dirC });
 
-    assert.equal(
-      jsonD.chunks.length, shapeD.totalChunks,
-      `distinct twin: predicted ${shapeD.totalChunks} chunks, observed ${jsonD.chunks.length}`
-    );
-    assert.equal(
-      jsonC.chunks.length, shapeC.totalChunks,
-      `collide case: predicted ${shapeC.totalChunks} chunks, observed ${jsonC.chunks.length}`
-    );
-    assert.equal(
-      jsonD.chunks.length - jsonC.chunks.length, collisions,
-      `colliding ${collisions} vendors onto one existing subset must cost exactly ${collisions} fewer real chunks than giving them distinct subsets: distinct=${jsonD.chunks.length}, collide=${jsonC.chunks.length}`
-    );
+      assert.equal(
+        jsonD.chunks.length, shapeD.totalChunks,
+        `distinct twin: predicted ${shapeD.totalChunks} chunks, observed ${jsonD.chunks.length}`
+      );
+      assert.equal(
+        jsonC.chunks.length, shapeC.totalChunks,
+        `collide case: predicted ${shapeC.totalChunks} chunks, observed ${jsonC.chunks.length}`
+      );
+      assert.equal(
+        jsonD.chunks.length - jsonC.chunks.length, collisions,
+        `colliding ${collisions} vendors onto one existing subset must cost exactly ${collisions} fewer real chunks than giving them distinct subsets: distinct=${jsonD.chunks.length}, collide=${jsonC.chunks.length}`
+      );
 
-    // The collision vendors' own modules must actually be present and
-    // reachable in the real build, not silently orphaned: an unimported file
-    // is simply excluded from the module graph by the bundler (not merged
-    // into a chunk), which would ALSO leave chunk count unchanged, for the
-    // wrong reason.
-    assert.equal(
-      sourceModuleCount(dirC, jsonC), shapeC.totalModules,
-      'collision vendor modules must be reachable in the real build, not silently orphaned'
-    );
-  } finally {
-    rmSync(dirD, { recursive: true, force: true });
-    rmSync(dirC, { recursive: true, force: true });
+      // The collision vendors' own modules must actually be present and
+      // reachable in the real build, not silently orphaned: an unimported file
+      // is simply excluded from the module graph by the bundler (not merged
+      // into a chunk), which would ALSO leave chunk count unchanged, for the
+      // wrong reason.
+      assert.equal(
+        sourceModuleCount(dirC, jsonC), shapeC.totalModules,
+        'collision vendor modules must be reachable in the real build, not silently orphaned'
+      );
+
+      // Assert the MECHANISM, not just the count: clique 0's own vendor (v0)
+      // must land in exactly one chunk in both twins, and in the collide case
+      // that chunk must actually CONTAIN all `collisions` collision vendors
+      // alongside v0 -- not merely produce a matching delta some other way.
+      const idsD0 = chunkIdsForVendor(dirD, jsonD, 0);
+      const idsC0 = chunkIdsForVendor(dirC, jsonC, 0);
+      assert.equal(idsD0.size, 1, `distinct twin: vendor v0 must land in exactly one chunk, found ${idsD0.size}`);
+      assert.equal(idsC0.size, 1, `collide case: vendor v0 must land in exactly one chunk, found ${idsC0.size}`);
+      const chunkD0 = [...idsD0][0];
+      const chunkC0 = [...idsC0][0];
+
+      const vendorPkgsD0 = vendorPackagesInChunk(dirD, jsonD, chunkD0);
+      const vendorPkgsC0 = vendorPackagesInChunk(dirC, jsonC, chunkC0);
+      assert.equal(
+        vendorPkgsD0.size, 1,
+        `distinct twin: v0's chunk must contain exactly 1 vendor package (itself), found ${vendorPkgsD0.size}: [${[...vendorPkgsD0]}]`
+      );
+      assert.equal(
+        vendorPkgsC0.size, 1 + collisions,
+        `collide case: v0's chunk must contain v0 plus all ${collisions} collision vendors (${1 + collisions} packages total, not merged into a route chunk instead), found ${vendorPkgsC0.size}: [${[...vendorPkgsC0]}]`
+      );
+
+      // Real-bytes cross-check: the collide twin's v0 chunk holds `1 +
+      // collisions` vendor packages' worth of (minified) content, so it must
+      // be substantially bigger than the distinct twin's v0 chunk, which
+      // holds only itself. Measured this session under the correct
+      // mechanism: distinct v0 chunk is 761B at both loop counts (it never
+      // contains any collision vendor); collide v0 chunk is 7,720B at
+      // collisions=10 (~10.14x) and 14,680B at collisions=20 (~19.29x). 5x is
+      // a generous margin below the SMALLER of those two measured ratios,
+      // and far above the ~1x a broken mechanism (collision vendors absorbed
+      // elsewhere, leaving v0's own chunk untouched) would produce.
+      const bytesD0 = chunkRealBytes(dirD, jsonD, chunkD0);
+      const bytesC0 = chunkRealBytes(dirC, jsonC, chunkC0);
+      assert.ok(
+        bytesC0 > bytesD0 * 5,
+        `collide case's v0 chunk (${bytesC0}B, ${vendorPkgsC0.size} vendor packages) must be substantially larger than the distinct twin's v0 chunk (${bytesD0}B, ${vendorPkgsD0.size} vendor package) -- ratio ${(bytesC0 / bytesD0).toFixed(2)}x`
+      );
+    } finally {
+      // Guarded: if the second mkdtempSync (dirC) throws, dirD is truthy and
+      // dirC is still undefined -- cleaning up only what was actually created.
+      if (dirD) rmSync(dirD, { recursive: true, force: true });
+      if (dirC) rmSync(dirC, { recursive: true, force: true });
+    }
   }
 });
 
@@ -642,6 +762,23 @@ test('module axis is orthogonal to the chunk axis: real chunk count does not mov
       const shape = generateCase({ targetModules, targetChunks, routes, modulesPerVendor: k }, dir);
       assert.equal(shape.totalChunks, targetChunks, 'fixture sanity: predicted chunk count must not depend on k');
       const json = await runRspack({ ...(await loadConfig(dir)), context: dir });
+      // Per-row CORRECTNESS check, not just cross-row INVARIANCE: the
+      // chunkCounts.size === 1 assertion below only proves every row agrees
+      // with every other row -- it stays green even if every row is
+      // uniformly wrong (measured directly this session: a fixed `name` on
+      // the vendor cache group produces 14/14/14 real chunks for k=2/4/8
+      // instead of 60/60/60, and chunkCounts.size is still 1; folding vendor
+      // 1 onto clique 0's subset at every k produces 59/59/59 instead of
+      // 60/60/60, same false pass). targetChunks is this test's own fixed
+      // input (60 at every k), so comparing the REAL build's chunk count
+      // against it directly is what test 16's per-row `r.modules ===
+      // r.predicted` check already does for the module axis -- this is the
+      // equivalent check for the chunk axis, and this test was the
+      // asymmetric one without it.
+      assert.equal(
+        json.chunks.length, targetChunks,
+        `k=${k}: real chunk count ${json.chunks.length} != targetChunks ${targetChunks}`
+      );
       results.push({ k, targetModules, chunks: json.chunks.length, modules: sourceModuleCount(dir, json) });
     } finally {
       rmSync(dir, { recursive: true, force: true });

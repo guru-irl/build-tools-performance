@@ -85,6 +85,44 @@ test('vendor-clique fidelity: every route import matches assignCliques exactly',
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("collision-vendor fidelity: every collision vendor is imported by exactly clique 0's route subset, at multiple counts", () => {
+  // test/generate.test.mjs previously only ever pinned collisionVendors to 0
+  // (see PARAMS above). This checks the actual ON-DISK wiring (not just
+  // computeCaseShape's arithmetic, which never runs generateCase's own
+  // wiring loops at all -- see test/shape.test.mjs's collisionVendors
+  // coverage for that) at more than one nonzero count, so a break confined
+  // to some counts (e.g. only above some threshold) cannot hide behind a
+  // single parameter point. Checked for EVERY collision vendor at each
+  // count, not a sample.
+  const routes = 12, k = 4, cliques = 47;
+  for (const collisionVendors of [3, 20]) {
+    const dir = mkdtempSync(path.join(process.cwd(), `.tmp-gen-coll-${collisionVendors}-`));
+    try {
+      const targetModules = (cliques + collisionVendors) * k + routes + 1 + 50;
+      const targetChunks = cliques + routes + 1;
+      const shape = generateCase({ targetModules, targetChunks, routes, modulesPerVendor: k, collisionVendors }, dir);
+      assert.equal(shape.cliques, cliques, 'fixture sanity: cliques must not depend on collisionVendors');
+      const subsets = assignCliques(shape.cliques, shape.routes);
+      const expectedRoutes = [...subsets[0]].sort((a, b) => a - b);
+
+      for (let c = 0; c < collisionVendors; c++) {
+        const v = shape.cliques + c;
+        const importingRoutes = [];
+        for (let r = 0; r < shape.routes; r++) {
+          const src = readFileSync(path.join(dir, `src/routes/r${r}.jsx`), 'utf8');
+          if (src.includes(`from '../vendors/v${v}/index.js'`)) importingRoutes.push(r);
+        }
+        assert.deepEqual(
+          importingRoutes, expectedRoutes,
+          `collisionVendors=${collisionVendors}: vendor v${v} imported by routes [${importingRoutes}], expected clique 0's subset [${expectedRoutes}]`
+        );
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
 test('route privacy: every app component is imported by exactly one route', () => {
   // Guards against corrupting the component<->route wiring inside generateCase
   // (e.g. a mapping bug that fans every component out to every route, which

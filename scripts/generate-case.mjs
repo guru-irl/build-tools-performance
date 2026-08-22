@@ -24,6 +24,22 @@ export function computeCaseShape({
   if (modulesPerVendor < 1) {
     throw new RangeError(`modulesPerVendor ${modulesPerVendor} must be >= 1`);
   }
+  // Unlike every other parameter here, collisionVendors previously had no
+  // guard at all. A non-integer or negative value does not throw naturally:
+  // it silently corrupts the `(cliques + collisionVendors) * modulesPerVendor`
+  // arithmetic below instead. Two failure shapes matter:
+  //   - collisionVendors=-1 or 2.5: vendorModules/totalModules quietly drift
+  //     off, without ever raising, so the totalModules == on-disk-modules
+  //     identity this generator promises silently breaks.
+  //   - collisionVendors='3' (a string): `cliques + collisionVendors` is
+  //     STRING CONCATENATION (47 + '3' -> '473', not 50), which DOES throw,
+  //     but as a confusing "vendor modules exceed module budget" RangeError
+  //     far from the real problem. This matters because case.params.json
+  //     round-trips this parameter as JSON, so a hand-authored
+  //     "collisionVendors": "3" hits exactly this path.
+  if (!Number.isInteger(collisionVendors) || collisionVendors < 0) {
+    throw new RangeError(`collisionVendors ${collisionVendors} must be a non-negative integer`);
+  }
   const cliques = targetChunks - routes - 1;
   // Benchmark-specific rule, stricter than the bare formula above: a case
   // must contain at least one vendor clique. The formula alone would

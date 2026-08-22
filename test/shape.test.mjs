@@ -20,6 +20,46 @@ test('satisfies both formulas exactly for m50k-c1k', () => {
   assert.equal(s.totalModules, 50000);
 });
 
+test('collisionVendors scales vendorModules/appModules at several counts, including collisions > cliques', () => {
+  // test/generate.test.mjs only ever pins collisionVendors to 0, and until
+  // this test, this file never mentioned it at all -- a single parameter
+  // point (whatever the one build.test.mjs collision-control test happens to
+  // use) cannot show the formula holds generally. Golden values below were
+  // computed independently (by hand, then cross-checked against
+  // computeCaseShape's own output) for cliques=47 (targetChunks 60, routes
+  // 12 -- the same base shape the collision-control build test uses, so
+  // cv=10 here is a direct cross-check against that test's own numbers).
+  const routes = 12, k = 4, targetChunks = 60, targetModules = 1000;
+  const golden = {
+    0: { vendorModules: 188, appModules: 799 },
+    1: { vendorModules: 192, appModules: 795 },
+    3: { vendorModules: 200, appModules: 787 },
+    10: { vendorModules: 228, appModules: 759 },
+    20: { vendorModules: 268, appModules: 719 },
+    25: { vendorModules: 288, appModules: 699 },
+    60: { vendorModules: 428, appModules: 559 }, // 60 > cliques (47)
+  };
+  for (const [collisionVendorsStr, expected] of Object.entries(golden)) {
+    const collisionVendors = Number(collisionVendorsStr);
+    const s = computeCaseShape({ targetModules, targetChunks, routes, modulesPerVendor: k, collisionVendors });
+    assert.equal(s.cliques, 47, `cv=${collisionVendors}: cliques must not depend on collisionVendors`);
+    assert.equal(
+      s.vendorModules, expected.vendorModules,
+      `cv=${collisionVendors}: vendorModules ${s.vendorModules} != expected ${expected.vendorModules}`
+    );
+    assert.equal(
+      s.appModules, expected.appModules,
+      `cv=${collisionVendors}: appModules ${s.appModules} != expected ${expected.appModules}`
+    );
+    // Fixture sanity (tautological by construction of computeCaseShape's own
+    // residual definitions -- kept for documentation, not relied on to prove
+    // anything on its own): totalModules always equals targetModules and
+    // totalChunks always equals targetChunks, regardless of collisionVendors.
+    assert.equal(s.totalModules, targetModules);
+    assert.equal(s.totalChunks, targetChunks);
+  }
+});
+
 test('rejects a shape with more routes than chunks to hold them', () => {
   assert.throws(
     () => computeCaseShape({ targetModules: 10000, targetChunks: 1000, routes: 1001, modulesPerVendor: 4 }),
@@ -54,6 +94,34 @@ test('rejects modulesPerVendor below 1', () => {
     () => computeCaseShape({ targetModules: 250, targetChunks: 60, routes: 12, modulesPerVendor: -1 }),
     RangeError
   );
+});
+
+test('rejects collisionVendors that is not a non-negative integer', () => {
+  // Unlike every other parameter here, collisionVendors had no guard at all.
+  // Bogus values silently broke the totalModules == on-disk-modules identity
+  // instead of throwing:
+  //   collisionVendors=-1   -> silently miscomputes vendorModules/totalModules
+  //   collisionVendors=2.5  -> silently miscomputes vendorModules/totalModules
+  //   collisionVendors='3'  -> `cliques + collisionVendors` is STRING
+  //     CONCATENATION (e.g. 47 + '3' -> '473', not 50), surfacing only as a
+  //     confusing "vendor modules exceed module budget" RangeError far from
+  //     the real problem. This matters because case.params.json round-trips
+  //     this parameter as JSON, so a hand-authored "collisionVendors": "3"
+  //     hits exactly this path.
+  //
+  // Each case checks the error MESSAGE mentions collisionVendors, not just
+  // "throws a RangeError": collisionVendors='3' already throws a RangeError
+  // today (the budget-overflow one above), so a bare
+  // assert.throws(fn, RangeError) would pass even without a real guard, for
+  // the wrong reason.
+  const base = { targetModules: 440, targetChunks: 60, routes: 12, modulesPerVendor: 4 };
+  for (const bad of [-1, 2.5, '3']) {
+    assert.throws(
+      () => computeCaseShape({ ...base, collisionVendors: bad }),
+      { name: 'RangeError', message: /collisionVendors/ },
+      `collisionVendors=${JSON.stringify(bad)} must be rejected as invalid, not silently miscomputed or rejected for an unrelated reason`
+    );
+  }
 });
 
 import { assignCliques } from '../scripts/generate-case.mjs';
