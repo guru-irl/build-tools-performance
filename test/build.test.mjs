@@ -525,3 +525,178 @@ test('cross-tool: rspack and vite chunk counts land within tolerance of each oth
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Invariance controls: the scientific controls for the whole benchmark, not
+// incidental regression tests. Each proves one claim this generator makes
+// about its own mechanism, on a REAL build -- not on generateCase's own
+// output -- because generator-only assertions have previously stayed green
+// while real chunk counts collapsed (see the fixed-`name` regression cited
+// above: 80->22 and 60->14) or an entry got tree-shaken to a single empty
+// chunk. If either control below were false, the case grid in
+// docs/design/synthetic-chunk-scaling.md would not actually decouple the two
+// axes it claims to.
+// ---------------------------------------------------------------------------
+
+test('collision control: N vendors sharing one route subset produce exactly N fewer real chunks than N vendors with distinct subsets, at equal module count', async () => {
+  // Two twin cases: same routes, same modulesPerVendor, same total vendor-
+  // package count (cliques + collisions), same module budget. The ONLY
+  // difference is whether the extra `collisions` vendor packages get their
+  // OWN distinct route subset (the "distinct" twin -- an ordinary case, just
+  // asked for that many cliques directly) or all reuse an EXISTING clique's
+  // subset via computeCaseShape's collisionVendors (the "collide" case --
+  // see generateCase, which wires collision vendors onto subsets[0] rather
+  // than allocating one of their own). A nameless splitChunks cache group
+  // groups by identical consumer-set, so if the mechanism is real, colliding
+  // must cost exactly `collisions` fewer chunks than being distinct -- not
+  // "roughly fewer", a specific, checkable number.
+  const routes = 12, k = 4, collisions = 10, cliques = 47, targetModules = 440;
+  const distinctParams = {
+    targetModules, targetChunks: cliques + collisions + routes + 1, routes, modulesPerVendor: k,
+  };
+  const collideParams = {
+    targetModules, targetChunks: cliques + routes + 1, routes, modulesPerVendor: k, collisionVendors: collisions,
+  };
+
+  const dirD = mkdtempSync(path.join(process.cwd(), '.tmp-coll-d-'));
+  const dirC = mkdtempSync(path.join(process.cwd(), '.tmp-coll-c-'));
+  try {
+    const shapeD = generateCase(distinctParams, dirD);
+    const shapeC = generateCase(collideParams, dirC);
+
+    // Accounting invariant, checked before any build: collision vendors must
+    // be counted as real vendor modules, identically to giving them distinct
+    // cliques of their own -- not silently dropped. Measured this session
+    // against a computeCaseShape that ignored collisionVendors entirely:
+    // shapeC.vendorModules was 188 (= cliques*k) instead of 228
+    // (= (cliques+collisions)*k, matching the distinct twin) -- and the two
+    // twins' REAL chunk counts already differed by exactly `collisions` even
+    // then (an ordinary 47-clique case next to an ordinary 57-clique case),
+    // so a chunk-count comparison ALONE cannot tell "collisions really merge"
+    // apart from "collisionVendors is a no-op"; this accounting check is what
+    // actually distinguishes them.
+    assert.equal(
+      shapeC.vendorModules, shapeD.vendorModules,
+      `collision vendors must be counted as real vendor modules: distinct twin has ${shapeD.vendorModules}, collide case has ${shapeC.vendorModules}`
+    );
+    assert.equal(shapeC.totalModules, shapeD.totalModules, 'fixture sanity: both twins must share the same module budget');
+    assert.notEqual(
+      shapeD.totalChunks, shapeC.totalChunks,
+      'fixture sanity: the two twins must predict different chunk counts, or this control proves nothing'
+    );
+
+    const jsonD = await runRspack({ ...(await loadConfig(dirD)), context: dirD });
+    const jsonC = await runRspack({ ...(await loadConfig(dirC)), context: dirC });
+
+    assert.equal(
+      jsonD.chunks.length, shapeD.totalChunks,
+      `distinct twin: predicted ${shapeD.totalChunks} chunks, observed ${jsonD.chunks.length}`
+    );
+    assert.equal(
+      jsonC.chunks.length, shapeC.totalChunks,
+      `collide case: predicted ${shapeC.totalChunks} chunks, observed ${jsonC.chunks.length}`
+    );
+    assert.equal(
+      jsonD.chunks.length - jsonC.chunks.length, collisions,
+      `colliding ${collisions} vendors onto one existing subset must cost exactly ${collisions} fewer real chunks than giving them distinct subsets: distinct=${jsonD.chunks.length}, collide=${jsonC.chunks.length}`
+    );
+
+    // The collision vendors' own modules must actually be present and
+    // reachable in the real build, not silently orphaned: an unimported file
+    // is simply excluded from the module graph by the bundler (not merged
+    // into a chunk), which would ALSO leave chunk count unchanged, for the
+    // wrong reason.
+    assert.equal(
+      sourceModuleCount(dirC, jsonC), shapeC.totalModules,
+      'collision vendor modules must be reachable in the real build, not silently orphaned'
+    );
+  } finally {
+    rmSync(dirD, { recursive: true, force: true });
+    rmSync(dirC, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Module-axis orthogonality controls: chunk count and module count must be
+// independently dialable in BOTH directions, on real build output, at more
+// than two points each -- a hard-coded constant returning the right answer
+// for a single shape cannot pass three differing ones.
+// ---------------------------------------------------------------------------
+
+test('module axis is orthogonal to the chunk axis: real chunk count does not move as source modules grow (cliques/routes fixed, modulesPerVendor varies)', async () => {
+  // cliques and routes fixed at SHAPE_B's own values (47, 12), so this is the
+  // same chunk shape (60) as SHAPE_B above; only modulesPerVendor (k) varies,
+  // and targetModules is chosen so that vendorModules (cliques*k, the only
+  // term that scales with k) is exactly cancelled back out by a correspondingly
+  // smaller appModules, leaving a fixed 199 app-only modules at every k --
+  // i.e. growth in modules comes entirely from the vendor side, same as any
+  // real case in the grid. The k=4 point (targetModules 400) reproduces
+  // SHAPE_B exactly, a useful cross-check against the identity test for that
+  // shape above.
+  const cliques = 47, routes = 12, targetChunks = cliques + routes + 1; // 60, SHAPE_B's own shape
+  const results = [];
+  for (const k of [2, 4, 8]) {
+    const dir = mkdtempSync(path.join(process.cwd(), `.tmp-orth1-${k}-`));
+    try {
+      const targetModules = cliques * k + 199 + routes + 1;
+      const shape = generateCase({ targetModules, targetChunks, routes, modulesPerVendor: k }, dir);
+      assert.equal(shape.totalChunks, targetChunks, 'fixture sanity: predicted chunk count must not depend on k');
+      const json = await runRspack({ ...(await loadConfig(dir)), context: dir });
+      results.push({ k, targetModules, chunks: json.chunks.length, modules: sourceModuleCount(dir, json) });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const chunkCounts = new Set(results.map((r) => r.chunks));
+  assert.equal(
+    chunkCounts.size, 1,
+    `real chunk count must not move as modulesPerVendor varies: ${JSON.stringify(results)}`
+  );
+  assert.ok(
+    results[2].modules > results[0].modules * 1.5,
+    `real source-module count must actually grow substantially across k=2..8, or this control proves nothing: ${JSON.stringify(results)}`
+  );
+});
+
+test('chunk axis is orthogonal to the module axis: real source-module count does not move as chunks vary (routes/modulesPerVendor/targetModules fixed)', async () => {
+  // routes, modulesPerVendor and targetModules fixed; only targetChunks
+  // varies, so only the vendor/app split inside the (constant) module budget
+  // moves -- computeCaseShape's own appModules formula is what keeps
+  // totalModules pinned at exactly targetModules regardless of targetChunks
+  // (see shape.test.mjs), but nothing upstream of this test had ever asked a
+  // REAL bundler whether the modules it actually consumes track that
+  // arithmetic as the chunk dial turns, at more than one point. The
+  // targetChunks=60 point reproduces SHAPE_B exactly (same 400/60/12/4 shape
+  // used throughout this file).
+  const routes = 12, k = 4, targetModules = 400;
+  const results = [];
+  for (const targetChunks of [40, 60, 100]) {
+    const dir = mkdtempSync(path.join(process.cwd(), `.tmp-orth2-${targetChunks}-`));
+    try {
+      const shape = generateCase({ targetModules, targetChunks, routes, modulesPerVendor: k }, dir);
+      assert.equal(shape.totalModules, targetModules, 'fixture sanity: predicted module count must not depend on targetChunks');
+      const json = await runRspack({ ...(await loadConfig(dir)), context: dir });
+      results.push({
+        targetChunks, chunks: json.chunks.length, modules: sourceModuleCount(dir, json), predicted: shape.totalModules,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const chunkCounts = new Set(results.map((r) => r.chunks));
+  assert.ok(
+    chunkCounts.size > 1,
+    `fixture sanity: real chunk count must actually move as targetChunks varies, or this control proves nothing: ${JSON.stringify(results)}`
+  );
+  const moduleCounts = new Set(results.map((r) => r.modules));
+  assert.equal(
+    moduleCounts.size, 1,
+    `real source-module count must not move as targetChunks varies: ${JSON.stringify(results)}`
+  );
+  for (const r of results) {
+    assert.equal(
+      r.modules, r.predicted,
+      `targetChunks=${r.targetChunks}: real source modules ${r.modules} != predicted ${r.predicted}`
+    );
+  }
+});

@@ -2,9 +2,21 @@
  * Chunk count is produced by distinct vendor consumer-sets ("cliques"), one
  * chunk each, plus one chunk per route plus the entry:
  *   chunks  = cliques + routes + 1
- *   modules = cliques*modulesPerVendor + appModules + routes + 1
+ *   modules = (cliques + collisionVendors)*modulesPerVendor + appModules + routes + 1
+ *
+ * collisionVendors (default 0) are extra vendor packages that deliberately
+ * REUSE an existing clique's route subset instead of getting a distinct one
+ * of their own (see generateCase, which wires them onto subsets[0]). A
+ * nameless splitChunks cache group emits one chunk per distinct consumer-
+ * set, so vendors sharing a subset merge into the chunk that subset already
+ * produces: collision vendors add modules to the build but never add
+ * chunks. This is the positive control proving chunk count tracks distinct
+ * cliques rather than merely counting vendor directories (see the
+ * collision-control test in test/build.test.mjs).
  */
-export function computeCaseShape({ targetModules, targetChunks, routes, modulesPerVendor }) {
+export function computeCaseShape({
+  targetModules, targetChunks, routes, modulesPerVendor, collisionVendors = 0,
+}) {
   // Each vendor writes modulesPerVendor files unconditionally (the leaf loop
   // runs k-1 times, plus index.js always). k <= 0 does not throw naturally:
   // the leaf loop just runs zero times, so vendorModules undercounts the
@@ -32,7 +44,12 @@ export function computeCaseShape({ targetModules, targetChunks, routes, modulesP
   if (cliques > 2 ** routes - 1) {
     throw new RangeError(`${routes} routes cannot encode ${cliques} distinct cliques`);
   }
-  const vendorModules = cliques * modulesPerVendor;
+  // collisionVendors are NOT part of `cliques` -- assignCliques still only
+  // ever allocates `cliques` distinct subsets (see generateCase). They are
+  // extra vendor packages layered on top that each reuse subsets[0], so they
+  // count toward vendorModules (real files, real modules) but never toward
+  // totalChunks below.
+  const vendorModules = (cliques + collisionVendors) * modulesPerVendor;
   const appModules = targetModules - vendorModules - routes - 1;
   if (appModules < 0) {
     throw new RangeError(
@@ -42,6 +59,7 @@ export function computeCaseShape({ targetModules, targetChunks, routes, modulesP
   return {
     routes,
     cliques,
+    collisionVendors,
     modulesPerVendor,
     vendorModules,
     appModules,
@@ -411,7 +429,7 @@ export default defineConfig({
 
 export function generateCase(params, outDir) {
   const shape = computeCaseShape(params);
-  const { routes, cliques, modulesPerVendor: k, appModules } = shape;
+  const { routes, cliques, collisionVendors, modulesPerVendor: k, appModules } = shape;
   const subsets = assignCliques(cliques, routes);
 
   // Regenerating into an existing outDir must not leave modules from a
@@ -432,6 +450,28 @@ export function generateCase(params, outDir) {
     }
     writeFileSync(path.join(dir, 'index.js'), vendorIndexBody(v, k));
     for (const r of subsets[v]) routeVendors[r].push(v);
+  }
+
+  // Collision vendors: extra vendor packages beyond the `cliques` distinct
+  // ones above, indexed contiguously after them. Each one deliberately
+  // reuses subsets[0] -- the FIRST clique's exact route subset -- instead of
+  // being allocated a subset of its own (which is what assignCliques(cliques,
+  // routes) above already guarantees is distinct for v < cliques). Sharing
+  // subsets[0] exactly means every collision vendor has the identical
+  // consumer-set to clique 0, so the nameless splitChunks cache group (see
+  // RSPACK_CONFIG below) merges all of them into the ONE chunk that subset
+  // already produces -- they add real vendor modules to the build without
+  // adding a single chunk. This must run BEFORE the route-body loop below,
+  // so every route in subsets[0] imports the collision vendors too.
+  for (let c = 0; c < collisionVendors; c++) {
+    const v = cliques + c;
+    const dir = path.join(outDir, `src/vendors/v${v}`);
+    mkdirSync(dir, { recursive: true });
+    for (let m = 0; m < k - 1; m++) {
+      writeFileSync(path.join(dir, `i${m}.js`), vendorModuleBody(v, m));
+    }
+    writeFileSync(path.join(dir, 'index.js'), vendorIndexBody(v, k));
+    for (const r of subsets[0]) routeVendors[r].push(v);
   }
 
   // App components are route-private: each belongs to exactly one route, so
