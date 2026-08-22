@@ -46,6 +46,20 @@ subset merged into one. Chunk count follows sharing topology, not package count.
 **Confirmed orthogonal.** Holding cliques at 127 and growing `k` from 1 to 48
 grew modules 151 → 6,247 while chunk count stayed pinned at exactly 142.
 
+**Orthogonality is a claim about _source_ modules.** The count a bundler
+reports is not the same quantity. Measured on rspack with modules pinned at
+1,000 and chunks dialed 40 → 240: on-disk source modules stayed at exactly
+1,000, while rspack-reported modules drifted 1,050 → 1,250 (+19%). The delta
+is `totalChunks + 10` — roughly 11 modules of framework and bundler runtime,
+plus one `ConcatenatedModule` wrapper per chunk. Those wrappers scale with the
+chunk dial by construction.
+
+An earlier draft attributed the delta to "a constant framework runtime"; that
+was wrong, and measuring it across 8 shapes disproved it. The generator's
+module axis is therefore defined and asserted on source modules, counted from
+rspack's own `nameForCondition` field deduplicated by path — which matches the
+predicted total exactly at every shape tested.
+
 ## Findings that motivated specific design choices
 
 ### rspack ignores the splitChunks request ceilings
@@ -77,8 +91,29 @@ clique grouping this generator synthesizes.
 
 On identical sources (511 cliques, 14 routes): **Vite 8.2.1 → 517 chunks with
 zero chunk config**; rspack 2.1.10 → 526 chunks, but only with an explicit
-nameless cache group. Vite's count is slightly lower because Rolldown merges
-very small chunks.
+nameless cache group.
+
+The gap is not "Rolldown merges very small chunks" — that was an early guess,
+and measuring it across 18 shapes disproved it. The relationship is exact and
+deterministic:
+
+```
+vite = rspack - size1cliques + 1
+size1cliques = min(floor(0.2 * cliques), routes)
+```
+
+A vendor reachable from exactly one route shares that route's reachability
+signature, so Rolldown folds it into the route chunk. rspack's `minChunks: 1`
+hoists it into its own chunk regardless. The difference is therefore exactly
+the number of single-route vendors, which this generator controls directly
+(20% of cliques by the size mix, capped by route count).
+
+Because of that, the Vite/rspack chunk ratio is **not** a constant. Measured
+across 18 shapes it drifts deterministically from **83.5% to 96%**, converging
+toward an asymptote of 5/6 ≈ 83.3% as `routes` approaches `0.2 * cliques`.
+An earlier draft of this document claimed the ratio holds at "≥ 90%"; that was
+extrapolated from two shapes and is wrong. The committed test suite asserts a
+floor of 0.78, chosen below the measured 83.35% floor rather than above it.
 
 ### Both scale linearly in chunk count
 
