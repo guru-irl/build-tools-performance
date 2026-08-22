@@ -57,3 +57,24 @@ test('every clique is a distinct non-empty route subset', () => {
 test('clique assignment is deterministic', () => {
   assert.deepEqual(assignCliques(50, 10), assignCliques(50, 10));
 });
+
+test('cliques spread across the whole route surface, not a few routes', () => {
+  // Regression guard. An earlier bit-encoding implementation was distinct but
+  // degenerate: at cliques=9699 / routes=300 only 14 routes carried any vendor
+  // and route 0 alone imported half the vendor graph. Chunk count was still
+  // correct, so only a load check catches this.
+  const routes = 300;
+  const subsets = assignCliques(9699, routes);
+  const load = new Array(routes).fill(0);
+  for (const sub of subsets) for (const r of sub) load[r]++;
+  const used = load.filter((n) => n > 0).length;
+  assert.equal(used, routes, 'every route must carry at least one vendor');
+  const max = Math.max(...load);
+  const min = Math.min(...load);
+  assert.ok(max / min < 3, `route load too skewed: ${min}..${max}`);
+});
+
+test('subsets vary in size rather than all being identical', () => {
+  const sizes = new Set(assignCliques(899, 100).map((s) => s.length));
+  assert.ok(sizes.size > 1, `expected mixed subset sizes, got ${[...sizes]}`);
+});
