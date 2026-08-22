@@ -5,6 +5,13 @@
  *   modules = cliques*modulesPerVendor + appModules + routes + 1
  */
 export function computeCaseShape({ targetModules, targetChunks, routes, modulesPerVendor }) {
+  // Each vendor writes modulesPerVendor files unconditionally (the leaf loop
+  // runs k-1 times, plus index.js always). k <= 0 does not throw naturally:
+  // the leaf loop just runs zero times, so vendorModules undercounts the
+  // on-disk file count by exactly `cliques` (one stray index.js per vendor).
+  if (modulesPerVendor < 1) {
+    throw new RangeError(`modulesPerVendor ${modulesPerVendor} must be >= 1`);
+  }
   const cliques = targetChunks - routes - 1;
   // Benchmark-specific rule, stricter than the bare formula above: a case
   // must contain at least one vendor clique. The formula alone would
@@ -162,7 +169,7 @@ export function assignCliques(cliques, routes) {
   return out;
 }
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 // Non-trivial body: real imports, a component, and enough surface that the
@@ -223,10 +230,56 @@ export default Route${r};
 `;
 }
 
+// The entry is real dispatch logic, not a bare list of import() statements:
+// a route registry plus a resolver/mount function that actually calls the
+// loaders. Every route id still gets its own static `import('./routes/rN.jsx')`
+// call site (so bundlers still split one chunk per route) but the file does
+// real work, clearing the 200-byte non-trivial-module floor at any routes
+// count, including routes=1 (a bare `import()` line is ~27 bytes there).
+export function entryBody(routes) {
+  const registry = Array.from({ length: routes }, (_, r) =>
+    `  ${r}: () => import('./routes/r${r}.jsx'),`).join('\n');
+  return `// Route registry: maps a numeric route id to a loader that dynamically
+// imports that route's module, so the bundler still splits one chunk per
+// route while this entry does real dispatch work instead of being a bare
+// list of import() statements.
+const ROUTES = {
+${registry}
+};
+
+export function resolveRoute(id) {
+  const loader = ROUTES[id];
+  if (typeof loader !== 'function') {
+    throw new RangeError(\`unknown route id: \${id}\`);
+  }
+  return loader();
+}
+
+export function dispatch(path) {
+  const ids = Object.keys(ROUTES).map(Number);
+  const n = ids.length;
+  const parsed = Number.parseInt(String(path).replace(/^\\//, ''), 10);
+  const safe = Number.isInteger(parsed) ? ((parsed % n) + n) % n : 0;
+  return resolveRoute(ids[safe]);
+}
+
+export default function mount(root) {
+  const ids = Object.keys(ROUTES).map(Number).sort((a, b) => a - b);
+  const checksum = ids.reduce((acc, id) => acc + id, 0);
+  return { root, count: ids.length, checksum, dispatch };
+}
+`;
+}
+
 export function generateCase(params, outDir) {
   const shape = computeCaseShape(params);
   const { routes, cliques, modulesPerVendor: k, appModules } = shape;
   const subsets = assignCliques(cliques, routes);
+
+  // Regenerating into an existing outDir must not leave modules from a
+  // previous (e.g. larger) generation on disk: a param change alone would
+  // otherwise silently mix stale files into the current case.
+  rmSync(path.join(outDir, 'src'), { recursive: true, force: true });
 
   mkdirSync(path.join(outDir, 'src/vendors'), { recursive: true });
   mkdirSync(path.join(outDir, 'src/routes'), { recursive: true });
@@ -258,9 +311,8 @@ export function generateCase(params, outDir) {
     );
   }
 
-  const entry = Array.from({ length: routes }, (_, r) =>
-    `import('./routes/r${r}.jsx');`).join('\n');
-  writeFileSync(path.join(outDir, 'src/index.jsx'), `${entry}\n`);
+  const entry = entryBody(routes);
+  writeFileSync(path.join(outDir, 'src/index.jsx'), entry);
 
   writeFileSync(path.join(outDir, 'case.params.json'), JSON.stringify(params, null, 2) + '\n');
   writeFileSync(path.join(outDir, 'index.html'),

@@ -41,6 +41,21 @@ test('rejects a shape whose vendor modules exceed the module budget', () => {
   );
 });
 
+test('rejects modulesPerVendor below 1', () => {
+  // k <= 0 silently breaks the module formula: vendor index.js files are
+  // still written unconditionally while the leaf loop (m < k-1) runs zero
+  // times, so on-disk file count drifts from shape.totalModules by exactly
+  // `cliques` without computeCaseShape ever noticing.
+  assert.throws(
+    () => computeCaseShape({ targetModules: 250, targetChunks: 60, routes: 12, modulesPerVendor: 0 }),
+    RangeError
+  );
+  assert.throws(
+    () => computeCaseShape({ targetModules: 250, targetChunks: 60, routes: 12, modulesPerVendor: -1 }),
+    RangeError
+  );
+});
+
 import { assignCliques } from '../scripts/generate-case.mjs';
 
 test('every clique is a distinct non-empty route subset', () => {
