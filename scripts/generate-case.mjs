@@ -40,3 +40,27 @@ export function computeCaseShape({ targetModules, targetChunks, routes, modulesP
     totalChunks: cliques + routes + 1,
   };
 }
+
+/**
+ * Vendor i is imported by the route subset encoded by the bits of (i+1).
+ * Distinctness is guaranteed by construction, and i+1 is never 0 so no
+ * subset is empty. Deterministic with no RNG.
+ *
+ * Uses BigInt rather than plain Number bit-shifts: routes is 100 and 300 in
+ * the committed cases, and `n >> r` on a Number is only well-defined for
+ * r < 31 (JS bitwise operators coerce to 32-bit signed integers), which
+ * would silently produce wrong subsets far below the routes this needs to
+ * support.
+ */
+export function assignCliques(cliques, routes) {
+  const out = [];
+  for (let i = 0; i < cliques; i++) {
+    const n = BigInt(i + 1);
+    const subset = [];
+    for (let r = 0; r < routes; r++) {
+      if ((n >> BigInt(r)) & 1n) subset.push(r);
+    }
+    out.push(subset);
+  }
+  return out;
+}

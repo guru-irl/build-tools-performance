@@ -40,3 +40,20 @@ test('rejects a shape whose vendor modules exceed the module budget', () => {
     RangeError
   );
 });
+
+import { assignCliques } from '../scripts/generate-case.mjs';
+
+test('every clique is a distinct non-empty route subset', () => {
+  const subsets = assignCliques(899, 100);
+  assert.equal(subsets.length, 899);
+  const seen = new Set(subsets.map((s) => s.join(',')));
+  assert.equal(seen.size, 899, 'subsets must be distinct');
+  for (const s of subsets) {
+    assert.ok(s.length > 0, 'subset must be non-empty');
+    assert.ok(s.every((r) => r >= 0 && r < 100), 'route indices in range');
+  }
+});
+
+test('clique assignment is deterministic', () => {
+  assert.deepEqual(assignCliques(50, 10), assignCliques(50, 10));
+});
