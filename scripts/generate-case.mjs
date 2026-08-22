@@ -276,6 +276,59 @@ export default function mount(root) {
 `;
 }
 
+// This config is identical for every case: it depends only on the fixed
+// directory layout generateCase always produces (src/index.jsx entry,
+// src/vendors/<name>/ packages), never on params. __dirname is computed from
+// this file's own on-disk location (import.meta.url), which is wherever
+// generateCase wrote it, so context/output.path are correct without templating.
+const RSPACK_CONFIG = `import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export default {
+  mode: 'production',
+  context: __dirname,
+  entry: { main: './src/index.jsx' },
+  resolve: { extensions: ['.js', '.jsx'] },
+  output: { path: path.join(__dirname, 'dist'), clean: true },
+  optimization: {
+    // Minification is mandatory: with it off, per-chunk cost is understated
+    // by orders of magnitude and the benchmark measures the wrong thing.
+    minimize: true,
+    splitChunks: {
+      chunks: 'all',
+      // minSize: 0 is required at both levels below. A nonzero minSize
+      // merges small chunks together and silently breaks the chunk-count
+      // dial (measured: raising it from 0 to 2000 on one case collapsed the
+      // chunk count by roughly 5x).
+      minSize: 0,
+      cacheGroups: {
+        // The built-in groups must be disabled, or they compete with
+        // vendorCliques below and absorb some vendor modules into their own,
+        // differently-shaped chunks.
+        default: false,
+        defaultVendors: false,
+        vendorCliques: {
+          test: /[\\\\/]vendors[\\\\/]/,
+          chunks: 'all',
+          minSize: 0,
+          minChunks: 1,
+          priority: -10,
+          // NO name here. A nameless cache group emits one chunk per distinct
+          // set of consuming chunks; assignCliques() guarantees every vendor
+          // package is imported by a distinct subset of routes, so distinct
+          // subsets produce exactly one chunk per vendor package -- this is
+          // what makes chunk count a dial. Giving this group a fixed name
+          // instead collapses many vendors into a shared handful of chunks
+          // and destroys that property.
+        },
+      },
+    },
+  },
+};
+`;
+
 export function generateCase(params, outDir) {
   const shape = computeCaseShape(params);
   const { routes, cliques, modulesPerVendor: k, appModules } = shape;
@@ -322,6 +375,9 @@ export function generateCase(params, outDir) {
   writeFileSync(path.join(outDir, 'case.params.json'), JSON.stringify(params, null, 2) + '\n');
   writeFileSync(path.join(outDir, 'index.html'),
     '<!doctype html><html><body><div id="root"></div><script type="module" src="/src/index.jsx"></script></body></html>\n');
+
+  // See RSPACK_CONFIG above for why this is a static template.
+  writeFileSync(path.join(outDir, 'rspack.config.mjs'), RSPACK_CONFIG);
 
   return shape;
 }
