@@ -17,3 +17,6 @@ tsconfig.tsbuildinfo
 
 # subagent-driven-development scratch (briefs, reports, ledger)
 .superpowers/
+
+# local agent-tool state/memory database, never commit
+.spider/
