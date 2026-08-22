@@ -93,3 +93,21 @@ test('subsets vary in size rather than all being identical', () => {
   const sizes = new Set(assignCliques(899, 100).map((s) => s.length));
   assert.ok(sizes.size > 1, `expected mixed subset sizes, got ${[...sizes]}`);
 });
+
+test('assignCliques handles the degenerate single-route case', () => {
+  // Regression guard. The arithmetic-progression sweep stepped `d` from 1 while
+  // `d < routes`, which never iterates at routes=1, so the only subset that
+  // exists ({0}) was never emitted and allocation threw. routes=1 forces
+  // cliques=1, so this made single-route cases impossible to generate.
+  assert.deepEqual(assignCliques(1, 1), [[0]]);
+  // At cliques=2 the size-mix weights all floor to zero and the remainder loop
+  // fills one size-1 and one size-2 bucket, so this is [[0], [0, 1]] rather
+  // than two singletons. Assert the invariants instead of the exact shape.
+  const two = assignCliques(2, 2);
+  assert.equal(two.length, 2);
+  assert.equal(new Set(two.map((s) => s.join(','))).size, 2, 'subsets must be distinct');
+  assert.ok(
+    two.every((s) => s.length > 0 && s.every((r) => r >= 0 && r < 2)),
+    'subsets must be non-empty and in range'
+  );
+});

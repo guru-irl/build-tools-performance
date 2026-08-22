@@ -149,7 +149,12 @@ export function assignCliques(cliques, routes) {
     let remaining = Number(alloc[b]);
     // d is the progression step; sweeping i over every route for each d keeps
     // per-route load even. d stops at routes-1 because larger steps repeat.
-    for (let d = 1; d < routes && remaining > 0; d++) {
+    // The lower bound of 1 matters at routes=1, where routes-1 is 0: the step
+    // is meaningless for a single route but the loop must still run once to
+    // emit the only subset that exists, {0}. Without it assignCliques(1, 1)
+    // threw "could not allocate", making routes=1 cases impossible to generate.
+    const maxStep = Math.max(1, routes - 1);
+    for (let d = 1; d <= maxStep && remaining > 0; d++) {
       for (let i = 0; i < routes && remaining > 0; i++) {
         const subset = [];
         for (let t = 0; t < size; t++) subset.push((i + t * d) % routes);
