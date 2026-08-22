@@ -8,3 +8,9 @@ dist-*
 .parcel-cache
 .turbopack
 tsconfig.tsbuildinfo
+
+# local-only registry auth, never commit
+.npmrc
+
+# generator scratch
+.tmp-*/
