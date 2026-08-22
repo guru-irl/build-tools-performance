@@ -161,3 +161,110 @@ export function assignCliques(cliques, routes) {
   }
   return out;
 }
+
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+// Non-trivial body: real imports, a component, and enough surface that the
+// minifier and transformer have actual work to do. Files are block-padded to
+// 4 KB on disk anyway, so this weight is free.
+function vendorModuleBody(v, m) {
+  return `const PREFIX_${m} = 'v${v}_i${m}';
+export function compute${m}(input) {
+  const parts = String(input).split('').map((c, i) => c.charCodeAt(0) + i);
+  const total = parts.reduce((a, b) => a + b, 0);
+  return { id: PREFIX_${m}, total, parts: parts.slice(0, 4) };
+}
+export const meta${m} = { name: PREFIX_${m}, version: '1.0.${m}', pure: true };
+export default compute${m};
+`;
+}
+
+function vendorIndexBody(v, k) {
+  const imports = Array.from({ length: k - 1 }, (_, m) =>
+    `import compute${m}, { meta${m} } from './i${m}.js';`).join('\n');
+  const uses = Array.from({ length: k - 1 }, (_, m) => `compute${m}(seed)`).join(', ');
+  const metas = Array.from({ length: k - 1 }, (_, m) => `meta${m}`).join(', ');
+  return `${imports}
+const NAME = 'vendor_${v}';
+export function vendor${v}(seed = ${v}) {
+  const results = [${uses}];
+  const metas = [${metas}];
+  return { name: NAME, results, metas, checksum: results.reduce((a, r) => a + r.total, 0) };
+}
+export default vendor${v};
+`;
+}
+
+function appComponentBody(i) {
+  return `import React from 'react';
+const LABEL_${i} = 'component_${i}';
+export function Component${i}({ value = ${i}, children }) {
+  const derived = React.useMemo(() => ({ label: LABEL_${i}, value, doubled: value * 2 }), [value]);
+  return React.createElement('div', { className: LABEL_${i}, 'data-value': derived.doubled }, children);
+}
+export default Component${i};
+`;
+}
+
+function routeBody(r, vendorIds, componentIds) {
+  const vImports = vendorIds.map((v) => `import vendor${v} from '../vendors/v${v}/index.js';`).join('\n');
+  const cImports = componentIds.map((c) => `import Component${c} from '../components/c${c}.jsx';`).join('\n');
+  const vCalls = vendorIds.map((v) => `vendor${v}()`).join(', ');
+  const cEls = componentIds.map((c) => `React.createElement(Component${c}, { key: ${c} })`).join(', ');
+  return `import React from 'react';
+${vImports}
+${cImports}
+export function Route${r}() {
+  const data = [${vCalls}];
+  return React.createElement('section', { className: 'route_${r}', 'data-n': data.length }, [${cEls}]);
+}
+export default Route${r};
+`;
+}
+
+export function generateCase(params, outDir) {
+  const shape = computeCaseShape(params);
+  const { routes, cliques, modulesPerVendor: k, appModules } = shape;
+  const subsets = assignCliques(cliques, routes);
+
+  mkdirSync(path.join(outDir, 'src/vendors'), { recursive: true });
+  mkdirSync(path.join(outDir, 'src/routes'), { recursive: true });
+  mkdirSync(path.join(outDir, 'src/components'), { recursive: true });
+
+  const routeVendors = Array.from({ length: routes }, () => []);
+  for (let v = 0; v < cliques; v++) {
+    const dir = path.join(outDir, `src/vendors/v${v}`);
+    mkdirSync(dir, { recursive: true });
+    for (let m = 0; m < k - 1; m++) {
+      writeFileSync(path.join(dir, `i${m}.js`), vendorModuleBody(v, m));
+    }
+    writeFileSync(path.join(dir, 'index.js'), vendorIndexBody(v, k));
+    for (const r of subsets[v]) routeVendors[r].push(v);
+  }
+
+  // App components are route-private: each belongs to exactly one route, so
+  // they add modules without creating new cliques.
+  const routeComponents = Array.from({ length: routes }, () => []);
+  for (let c = 0; c < appModules; c++) {
+    writeFileSync(path.join(outDir, `src/components/c${c}.jsx`), appComponentBody(c));
+    routeComponents[c % routes].push(c);
+  }
+
+  for (let r = 0; r < routes; r++) {
+    writeFileSync(
+      path.join(outDir, `src/routes/r${r}.jsx`),
+      routeBody(r, routeVendors[r], routeComponents[r])
+    );
+  }
+
+  const entry = Array.from({ length: routes }, (_, r) =>
+    `import('./routes/r${r}.jsx');`).join('\n');
+  writeFileSync(path.join(outDir, 'src/index.jsx'), `${entry}\n`);
+
+  writeFileSync(path.join(outDir, 'case.params.json'), JSON.stringify(params, null, 2) + '\n');
+  writeFileSync(path.join(outDir, 'index.html'),
+    '<!doctype html><html><body><div id="root"></div><script type="module" src="/src/index.jsx"></script></body></html>\n');
+
+  return shape;
+}
