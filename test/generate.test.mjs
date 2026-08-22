@@ -4,6 +4,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:f
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { generateCase, assignCliques, entryBody } from '../scripts/generate-case.mjs';
 
 const PARAMS = {
@@ -146,22 +147,113 @@ test('entry module is non-trivial (>= 200 bytes) even at routes=1', () => {
   assert.match(body, /import\('\.\/routes\/r0\.jsx'\)/, 'entry must still dynamically import every route');
 });
 
-test('emitted rspack.config.mjs source contains no nondeterministic time/random APIs', () => {
+// Every config file generateCase emits, found generically rather than by a
+// hard-coded filename list -- a fixed list (e.g. just 'rspack.config.mjs')
+// silently stops covering a NEW emitted config the day one is added. This
+// generator currently emits exactly two: rspack.config.mjs and
+// vite.config.mjs.
+function emittedConfigFiles(dir) {
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.config.mjs'))
+    .sort();
+}
+
+test('emitted *.config.mjs sources contain no nondeterministic time/random APIs', () => {
   // A static string is only actually deterministic if it stays a static
-  // string. Injecting e.g. output.filename: `[id].${Date.now()}.js` would
-  // leave every existing test green (chunk counts, module counts, and file
-  // structure are all unaffected) while making the BUILD nondeterministic
-  // across runs. This is a cheap, build-free first line of defense; see the
-  // real double-build comparison in test/build.test.mjs for the dynamic
-  // check.
+  // string. Injecting e.g. output.filename: `[id].${Date.now()}.js` (rspack)
+  // or `// generated at ${Date.now()}` (vite) would leave every existing test
+  // green (chunk counts, module counts, and file structure are all
+  // unaffected) while making the BUILD nondeterministic across runs -- and,
+  // for a template that is a module-level `const` evaluated once per
+  // process (both RSPACK_CONFIG and VITE_CONFIG are), the SAME-PROCESS
+  // byte-identical-tree test below cannot catch it either: every
+  // generateCase() call in one process reuses the one value already baked
+  // into the template at that process's first import, so two dirs generated
+  // in the same `node --test` run hash identical even though two SEPARATE
+  // processes would each bake in a different timestamp (verified directly:
+  // two independent `node -e` processes generating the same params produced
+  // two different `Date.now()` values in their emitted vite.config.mjs).
+  // This is a cheap, build-free first line of defense that scans every
+  // emitted config generically (not just rspack.config.mjs -- vite.config.mjs
+  // needs exactly the same guard, and so would any future emitted config);
+  // see the real double-build comparison in test/build.test.mjs for the
+  // dynamic, build-based check.
   const dir = mkdtempSync(path.join(process.cwd(), '.tmp-gen-'));
   try {
     generateCase(PARAMS, dir);
-    const src = readFileSync(path.join(dir, 'rspack.config.mjs'), 'utf8');
+    const files = emittedConfigFiles(dir);
+    assert.ok(
+      files.length >= 2,
+      `expected to find at least rspack.config.mjs and vite.config.mjs, found [${files}]`
+    );
+    for (const file of files) {
+      const src = readFileSync(path.join(dir, file), 'utf8');
+      assert.doesNotMatch(
+        src,
+        /Math\.random|Date\.now|Date\(|crypto|hrtime/,
+        `${file}: config source must not embed a nondeterministic value at generation/import time`
+      );
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('emitted vite.config.mjs source contains no manualChunks or advancedChunks configuration', () => {
+  // Structural guard. The only pre-existing guard against a hand-written
+  // manual chunking config was a single exact property path in
+  // test/build.test.mjs: `cfg.build.rollupOptions?.output?.manualChunks`.
+  // Rollup/Vite equally accept `output` as an ARRAY of output configs
+  // (`output: [ { manualChunks(id) {...} } ]`), and `.manualChunks` on an
+  // array is `undefined` regardless of what the array's entries contain --
+  // so that check passes on an array-form config even though manual chunking
+  // is very much active (confirmed directly this session: with an array-form
+  // manualChunks in the emitted config, all pre-existing build.test.mjs
+  // assertions stayed green). Scanning the raw emitted SOURCE TEXT for the
+  // token itself catches every syntactic form (array or object, any nesting),
+  // and also covers `advancedChunks`, Rolldown's own named-group chunking
+  // option -- a second way to force the same forbidden outcome that no
+  // existing assertion looked for at all.
+  const dir = mkdtempSync(path.join(process.cwd(), '.tmp-gen-'));
+  try {
+    generateCase(PARAMS, dir);
+    const src = readFileSync(path.join(dir, 'vite.config.mjs'), 'utf8');
     assert.doesNotMatch(
-      src,
-      /Math\.random|Date\.now|Date\(|crypto|hrtime/,
-      'config source must not embed a nondeterministic value at generation/import time'
+      src, /manualChunks/,
+      'vite.config.mjs must not hand-write manualChunks in any form -- that would force agreement by configuration instead of measuring it'
+    );
+    assert.doesNotMatch(
+      src, /advancedChunks/,
+      "vite.config.mjs must not hand-write advancedChunks -- Rolldown's named-group equivalent of manualChunks"
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('emitted vite.config.mjs source contains no plugins configuration at any nesting level', () => {
+  // Structural guard. The only pre-existing guard against a transform plugin
+  // was `assert.ok(!cfg.plugins || cfg.plugins.length === 0)` in
+  // test/build.test.mjs, which only inspects the TOP-level `plugins` array on
+  // the loaded config object. A real per-module transform plugin registered
+  // at `build.rollupOptions.plugins` (a legal Rollup config location,
+  // distinct from Vite's top-level `plugins`) is invisible to that check
+  // while firing on every module Rollup processes (confirmed directly this
+  // session: a `transform` hook placed there fired on 404 modules for a
+  // 400-source-module case, while every pre-existing build.test.mjs
+  // assertion stayed green). Zero transform plugins is deliberate: generated
+  // components use React.createElement, not JSX, so any transform is a
+  // loader-speed confound between the two tools. Scanning the raw emitted
+  // source text for the `plugins` token catches it at any nesting depth,
+  // present or future, not just the one location a config object happens to
+  // be inspected at.
+  const dir = mkdtempSync(path.join(process.cwd(), '.tmp-gen-'));
+  try {
+    generateCase(PARAMS, dir);
+    const src = readFileSync(path.join(dir, 'vite.config.mjs'), 'utf8');
+    assert.doesNotMatch(
+      src, /plugins/,
+      'vite.config.mjs must not configure any plugins, top-level or nested -- a transform plugin is a loader-speed confound this benchmark deliberately excludes'
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -204,5 +296,41 @@ test('is deterministic: same params produce byte-identical trees', () => {
   } finally {
     rmSync(a, { recursive: true, force: true });
     rmSync(b, { recursive: true, force: true });
+  }
+});
+
+test('generating the same params in two SEPARATE PROCESSES emits byte-identical config sources', () => {
+  // The regex scan above (and the same-process byte-identical-trees test)
+  // both have a shared blind spot: a nondeterministic value INTERPOLATED
+  // into a config template's definition inside generate-case.mjs itself --
+  // e.g. `` `// generated at ${Date.now()}` `` written into the VITE_CONFIG
+  // template literal -- is evaluated exactly once, when generate-case.mjs's
+  // module top level first runs. Within a single process every generateCase()
+  // call reuses that one frozen string, so two dirs generated in the SAME
+  // test (same process) hash identical regardless -- the same-process test
+  // above cannot catch it. And by the time it reaches disk the interpolation
+  // has already evaluated to a plain number (e.g. `// generated at
+  // 1787403519949`), so the literal text "Date.now" never appears in the
+  // emitted file either -- the regex scan above cannot catch it (confirmed
+  // directly this session: with that exact corruption injected, both of
+  // those tests stayed green). Only two genuinely separate OS processes,
+  // each importing generate-case.mjs fresh, expose it: confirmed directly
+  // this session that two independent `node -e` processes generating
+  // identical params emitted two different frozen timestamps.
+  const dirA = mkdtempSync(path.join(process.cwd(), '.tmp-gen-proc-a-'));
+  const dirB = mkdtempSync(path.join(process.cwd(), '.tmp-gen-proc-b-'));
+  try {
+    const generatorUrl = pathToFileURL(path.resolve('scripts/generate-case.mjs')).href;
+    const childScript = (dir) =>
+      `import(${JSON.stringify(generatorUrl)}).then(({ generateCase }) => generateCase(${JSON.stringify(PARAMS)}, ${JSON.stringify(dir)}));`;
+    execFileSync(process.execPath, ['-e', childScript(dirA)], { encoding: 'utf8' });
+    execFileSync(process.execPath, ['-e', childScript(dirB)], { encoding: 'utf8' });
+    assert.equal(
+      hashTree(dirA), hashTree(dirB),
+      'generating identical params in two separate node processes must emit byte-identical config sources -- a per-process-frozen value (e.g. Date.now baked in at module load) would differ here'
+    );
+  } finally {
+    rmSync(dirA, { recursive: true, force: true });
+    rmSync(dirB, { recursive: true, force: true });
   }
 });

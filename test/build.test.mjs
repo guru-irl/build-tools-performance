@@ -296,25 +296,88 @@ async function buildVite(dir) {
   return out.filter((o) => o.type === 'chunk').length;
 }
 
-// Measured directly in this repo, real builds, minify on, same generateCase
+// Real files written under dist-vite/, walked from disk (mirrors distBytes()
+// above, which does the same for rspack's dist/). A file-COUNT check alone
+// (written.length === viteChunks) cannot tell a real build from an empty
+// one: the entryBody tree-shaking collapse this task's investigation found
+// (see VITE_CHUNK_TOLERANCE's comment below) emits exactly 1 file for a
+// reported 1 chunk -- satisfying a count check trivially -- and that file is
+// 0 bytes (confirmed directly this session: reproducing that exact collapse
+// on both SHAPE_A and SHAPE_B measured `written.length: 1, bytes: 0` for
+// both). A byte floor closes that gap.
+function writtenViteFiles(dir) {
+  return readdirSync(path.join(dir, 'dist-vite'), { recursive: true })
+    .map((p) => path.join(dir, 'dist-vite', p))
+    .filter((p) => statSync(p).isFile());
+}
+
+// Measured directly this session, real builds, same two shapes used
+// throughout this file, stable across 3 repeats each (byte-identical every
+// time): SHAPE_A dist-vite totals 87,366B, SHAPE_B totals 87,451B. 50,000B
+// sits with real headroom below both (about 43% and 42% below, respectively)
+// while being far above the 0B the degenerate tree-shaking collapse above
+// produces -- the failure this floor exists to catch.
+const VITE_DIST_BYTE_FLOOR = 50_000;
+
+// Measured directly this session, real builds, minify on, same generateCase
 // output rspack builds elsewhere in this file (see buildCase()'s asserted
 // totals above):
-//   SHAPE_A (cliques 59, routes 20, predicted/rspack 80 chunks): vite 70  -> 87.50%
-//   SHAPE_B (cliques 47, routes 12, predicted/rspack 60 chunks): vite 52  -> 86.67%
-// A from-scratch edge case (targetModules 100, targetChunks 3, routes 1,
-// modulesPerVendor 20 -- predicted/rspack 3 chunks) also measured: vite 2 ->
-// 66.67%. At that scale a single merged chunk swings the ratio enormously
-// (1 chunk out of 3 is a third of the total), so it is deliberately NOT one
-// of the shapes this tolerance is asserted against below -- this generator's
-// real cases target hundreds to thousands of chunks (see the case grid in
-// docs/design/synthetic-chunk-scaling.md), not single digits. A larger case
-// (targetModules 10000, targetChunks 1000, routes 100, modulesPerVendor 4)
-// measured closer to parity: vite 901 / rspack 1000 -> 90.10%. 0.8 sits with
-// real headroom below the lowest of the two asserted-shape measurements
-// (86.67%) without being so loose it would pass the collapsed counts a
-// broken config produces (see the entryBody tree-shaking bug this task found
-// and fixed: 1 chunk instead of ~80 -- 1/80 = 1.25%, nowhere close to 80%).
-const VITE_CHUNK_TOLERANCE = 0.8;
+//   SHAPE_A (cliques 59, routes 20, rspack 80 chunks): vite 70  -> 87.50%
+//   SHAPE_B (cliques 47, routes 12, rspack 60 chunks): vite 52  -> 86.67%
+// Both committed shapes are comfortably inside the tolerance below, but they
+// are NOT close to the real floor -- an earlier version of this comment
+// claimed "real headroom below the lowest of the two asserted-shape
+// measurements (86.67%)" (~6.7-8 points). That does not hold once more of
+// the parameter space is sampled.
+//
+// This generator's own vendor-clique allocation always gives ~20% of
+// cliques a subset of exactly one route (SIZE_MIX above, `size: 1, weight:
+// 0.2`). A vendor reachable from exactly one route shares that route's
+// reachability signature, so Rollup/Rolldown (reachability-based) merges it
+// into the route's own chunk, while rspack's `minChunks: 1` cache group
+// (test-based, not reachability-based) hoists it out as a separate chunk
+// regardless. Confirmed exactly, this session, across 9 additional shapes
+// spanning routes 12-1000 and cliques 47-5000 (modulesPerVendor both 4 and
+// 8): counting the real length-1 subsets assignCliques(cliques, routes)
+// returns for each shape (call it size1cliques),
+//   vite = rspack - size1cliques + 1
+// held exactly -- max |real vite chunks - this prediction| across all 9 was
+// 0. That mechanism makes the ratio lowest when routes == 0.2 * cliques
+// (fewer routes than that and size1cliques is capped at `routes`, so
+// proportionally less merges away; more routes than that and size1cliques
+// stays ~0.2*cliques while the total grows, so it is a shrinking share), and
+// at that crossover the ratio tends toward cliques / (1.2*cliques) = 5/6 =
+// 83.33% as cliques grows, approached from above but never below it.
+// Measured directly this session, at the crossover, three scales: cliques
+// 500 routes 100 -> 83.53% (both modulesPerVendor 4 and 8 -- confirming the
+// ratio does not depend on modulesPerVendor), cliques 2000 routes 400 ->
+// 83.38%, cliques 5000 routes 1000 -> 83.35%, the lowest ratio measured this
+// session and the closest to that 83.33% asymptote. Two shapes deliberately
+// far from the crossover, also measured this session, land well above it
+// instead (cliques 1000 routes 50, i.e. far fewer routes than the crossover
+// needs -> 95.34%; cliques 100 routes 300, i.e. far more routes than it
+// needs -> 95.26%), consistent with the crossover being the real floor and
+// not an arbitrary worst case. A tiny edge case (targetModules 100,
+// targetChunks 3, routes 1, modulesPerVendor 20) also measured this session:
+// vite 2 / rspack 3 -> 66.67% -- at that scale a single merged chunk is a
+// third of the total, so it is deliberately NOT one of the shapes this
+// tolerance is asserted against below (this generator's real cases target
+// hundreds to thousands of chunks, see the case grid in
+// docs/design/synthetic-chunk-scaling.md, not single digits). A ten-thousand
+// module case (targetModules 10000, targetChunks 1000, routes 100,
+// modulesPerVendor 4) also measured this session: vite 901 / rspack 1000 ->
+// 90.10%, well clear of the crossover for that shape's routes:cliques ratio.
+//
+// 0.78 sits with real headroom (~5.3 percentage points) below the lowest
+// ratio measured this session (83.35%), which itself sits within ~0.02
+// points of the mechanism's own asymptotic floor (5/6 = 83.33...%) -- i.e.
+// this tolerance is not expected to need lowering further for any shape
+// this generator can actually produce, for the structural reason above, not
+// just because no counterexample happened to be sampled. It remains nowhere
+// close to loose enough to pass a genuinely broken build: the entryBody
+// tree-shaking collapse this task's own investigation found and fixed
+// produced a ratio of 1/80 = 1.25%.
+const VITE_CHUNK_TOLERANCE = 0.78;
 
 test('vite real build reaches a comparable chunk count with no manual chunk config (targetChunks=80 shape)', async () => {
   const dir = mkdtempSync(path.join(process.cwd(), '.tmp-build-'));
@@ -354,11 +417,18 @@ test('vite real build reaches a comparable chunk count with no manual chunk conf
 
     // CRITICAL requirement: Vite must actually write to disk, not just return
     // an in-memory bundle (write: false would silently exclude emission from
-    // any later timing/size comparison and bias it against rspack).
-    const written = readdirSync(path.join(dir, 'dist-vite'), { recursive: true })
-      .map((p) => path.join(dir, 'dist-vite', p))
-      .filter((p) => statSync(p).isFile());
+    // any later timing/size comparison and bias it against rspack). Checked
+    // at both shapes (see the targetChunks=60 test below), not just this one,
+    // and backed by a real byte floor, not just a file count -- see
+    // writtenViteFiles()/VITE_DIST_BYTE_FLOOR above for why the count alone
+    // is not enough.
+    const written = writtenViteFiles(dir);
     assert.equal(written.length, viteChunks, 'every reported chunk must be a real file on disk');
+    const bytes = written.reduce((n, p) => n + statSync(p).size, 0);
+    assert.ok(
+      bytes >= VITE_DIST_BYTE_FLOOR,
+      `dist-vite output for shape 400/80/20/4 is ${bytes}B, expected >= ${VITE_DIST_BYTE_FLOOR}B`
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -379,6 +449,16 @@ test('vite real build reaches a comparable chunk count with no manual chunk conf
       viteChunks > shape.routes,
       `vite chunk count ${viteChunks} looks degenerate (<= route count ${shape.routes})`
     );
+
+    // Extended to this second shape too (see FIX 8 in the review this task
+    // closes): the disk-emit check previously ran at SHAPE_A only.
+    const written = writtenViteFiles(dir);
+    assert.equal(written.length, viteChunks, 'every reported chunk must be a real file on disk');
+    const bytes = written.reduce((n, p) => n + statSync(p).size, 0);
+    assert.ok(
+      bytes >= VITE_DIST_BYTE_FLOOR,
+      `dist-vite output for shape 400/60/12/4 is ${bytes}B, expected >= ${VITE_DIST_BYTE_FLOOR}B`
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -390,14 +470,28 @@ test('vite real build reaches a comparable chunk count with no manual chunk conf
 // independently to the formula, which the two tests above already do).
 // ---------------------------------------------------------------------------
 
-// Measured directly (same builds cited above): relative difference
-// |vite - rspack| / rspack was 12.5% (SHAPE_A: |70-80|/80) and 13.3% (SHAPE_B:
-// |52-60|/60). 0.2 (20%) sits with real headroom above both measurements --
-// enough to absorb ordinary run-to-run variance (none was observed across 5
-// repeats of the same shape in the same build; see task-5-report.md) without
-// being loose enough to pass a genuinely broken comparison: the historical
-// splitChunks-name regression this repo has already guarded against
-// elsewhere (60 -> 14 chunks) would be a 76.7% relative difference here.
+// Measured directly this session (same builds cited above): relative
+// difference |vite - rspack| / rspack was 12.5% (SHAPE_A: |70-80|/80) and
+// 13.3% (SHAPE_B: |52-60|/60). These are the same underlying ratio
+// VITE_CHUNK_TOLERANCE bounds, viewed as a complement (relDiff == 1 - ratio
+// at the shapes where both are asserted, since rspack's real chunk count
+// always equals shape.totalChunks -- see the identity tests above); see that
+// constant's comment for the measured floor and mechanism across a wider set
+// of shapes (10 measured this session): the same complementary ratio rose to
+// 16.65% there, so real headroom here is ~3.3 percentage points, not a wide
+// margin, though it still holds at every shape measured. 0.2 (20%) is
+// nowhere close to loose enough to pass a genuinely broken comparison:
+// reproduced directly this session, giving the vendor cache group a fixed
+// `name` (the historical splitChunks-name regression this repo already
+// guards against elsewhere) breaks rspack's own chunk count (SHAPE_A 80 ->
+// 22, SHAPE_B 60 -> 14) while leaving vite's real count (70 / 52) unmoved --
+// a purely rspack-side config corruption cannot move a vite build -- and
+// that mismatch is exactly what this test's own formula, |vite - rspack| /
+// rspack, blows up to: 218.2% for SHAPE_A and 271.4% for SHAPE_B, over 10x
+// this tolerance's ceiling. (A prior version of this comment stated 76.7%
+// here, which is |14 - 60| / 60 -- the ORIGINAL shape's rspack count vs the
+// CORRUPTED one, a different quantity from this test's own formula above,
+// and not one this test computes.)
 const CROSS_TOOL_RELATIVE_TOLERANCE = 0.2;
 
 test('cross-tool: rspack and vite chunk counts land within tolerance of each other on the same generated case (targetChunks=80 shape)', async () => {
