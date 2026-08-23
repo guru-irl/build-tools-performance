@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200">
+<rect width="1200" height="1200" fill="#ffffff"/>
+<text x="130" y="52" font-family="Helvetica,Arial" font-size="30" font-weight="600" fill="#1a1a1a">Build time vs module count</text>
+<text x="130" y="82" font-family="Helvetica,Arial" font-size="17" fill="#666">chunk count held fixed · median of 3 runs · Apple M5 Pro, 18 cores · rspack 2.1.10 / vite 8.2.1</text>
+<line x1="130" y1="110" x2="1130" y2="110" stroke="#e3e3e3" stroke-width="1"/>
+<text x="116" y="115" text-anchor="end" font-family="Helvetica,Arial" font-size="15" fill="#555">7.9s</text>
+<line x1="130" y1="264" x2="1130" y2="264" stroke="#e3e3e3" stroke-width="1"/>
+<text x="116" y="269" text-anchor="end" font-family="Helvetica,Arial" font-size="15" fill="#555">6.3s</text>
+<line x1="130" y1="418" x2="1130" y2="418" stroke="#e3e3e3" stroke-width="1"/>
+<text x="116" y="423" text-anchor="end" font-family="Helvetica,Arial" font-size="15" fill="#555">4.7s</text>
+<line x1="130" y1="572" x2="1130" y2="572" stroke="#e3e3e3" stroke-width="1"/>
+<text x="116" y="577" text-anchor="end" font-family="Helvetica,Arial" font-size="15" fill="#555">3.1s</text>
+<line x1="130" y1="726" x2="1130" y2="726" stroke="#e3e3e3" stroke-width="1"/>
+<text x="116" y="731" text-anchor="end" font-family="Helvetica,Arial" font-size="15" fill="#555">1.6s</text>
+<line x1="130" y1="880" x2="1130" y2="880" stroke="#e3e3e3" stroke-width="1"/>
+<text x="116" y="885" text-anchor="end" font-family="Helvetica,Arial" font-size="15" fill="#555">0.0s</text>
+<line x1="130" y1="880" x2="1130" y2="880" stroke="#1a1a1a" stroke-width="1.5"/>
+<line x1="130" y1="110" x2="130" y2="880" stroke="#1a1a1a" stroke-width="1.5"/>
+<text x="368.0952380952381" y="908" text-anchor="middle" font-family="Helvetica,Arial" font-size="15" fill="#555">25k</text>
+<text x="606.1904761904761" y="908" text-anchor="middle" font-family="Helvetica,Arial" font-size="15" fill="#555">50k</text>
+<text x="844.2857142857143" y="908" text-anchor="middle" font-family="Helvetica,Arial" font-size="15" fill="#555">75k</text>
+<text x="1082.3809523809523" y="908" text-anchor="middle" font-family="Helvetica,Arial" font-size="15" fill="#555">100k</text>
+<text x="630" y="942" text-anchor="middle" font-family="Helvetica,Arial" font-size="17" fill="#1a1a1a">source modules</text>
+<text x="34" y="495" text-anchor="middle" font-family="Helvetica,Arial" font-size="17" fill="#1a1a1a" transform="rotate(-90 34 495)">median build time</text>
+<polyline fill="none" stroke="#c0392b" stroke-width="3" stroke-dasharray="none" points="368.0952380952381,686.6135230412551 606.1904761904761,607.6742782735732 844.2857142857143,538.614666370248 1082.3809523809523,439.32924699082156"/>
+<circle cx="368.0952380952381" cy="686.6135230412551" r="6" fill="#c0392b"/>
+<line x1="368.0952380952381" y1="689.6458856035824" x2="368.0952380952381" y2="684.070251214787" stroke="#c0392b" stroke-width="2"/>
+<circle cx="606.1904761904761" cy="607.6742782735732" r="6" fill="#c0392b"/>
+<line x1="606.1904761904761" y1="608.0655508622606" x2="606.1904761904761" y2="605.6200971829644" stroke="#c0392b" stroke-width="2"/>
+<circle cx="844.2857142857143" cy="538.614666370248" r="6" fill="#c0392b"/>
+<line x1="844.2857142857143" y1="541.842665226919" x2="844.2857142857143" y2="533.9193953059993" stroke="#c0392b" stroke-width="2"/>
+<circle cx="1082.3809523809523" cy="439.32924699082156" r="6" fill="#c0392b"/>
+<line x1="1082.3809523809523" y1="448.1328802362879" x2="1082.3809523809523" y2="436.29688442849425" stroke="#c0392b" stroke-width="2"/>
+<polyline fill="none" stroke="#2c6fbb" stroke-width="3" stroke-dasharray="none" points="368.0952380952381,723.1975100835265 606.1904761904761,665.4848032521359 844.2857142857143,598.8706450281068 1082.3809523809523,529.517578683266"/>
+<circle cx="368.0952380952381" cy="723.1975100835265" r="6" fill="#2c6fbb"/>
+<line x1="368.0952380952381" y1="727.8927811477753" x2="368.0952380952381" y2="720.0673293740274" stroke="#2c6fbb" stroke-width="2"/>
+<circle cx="606.1904761904761" cy="665.4848032521359" r="6" fill="#2c6fbb"/>
+<line x1="606.1904761904761" y1="667.1477117540571" x2="606.1904761904761" y2="662.9415314256677" stroke="#2c6fbb" stroke-width="2"/>
+<circle cx="844.2857142857143" cy="598.8706450281068" r="6" fill="#2c6fbb"/>
+<line x1="844.2857142857143" y1="603.0768253564963" x2="844.2857142857143" y2="598.4793724394194" stroke="#2c6fbb" stroke-width="2"/>
+<circle cx="1082.3809523809523" cy="529.517578683266" r="6" fill="#2c6fbb"/>
+<line x1="1082.3809523809523" y1="531.473941626703" x2="1082.3809523809523" y2="528.6372153587195" stroke="#2c6fbb" stroke-width="2"/>
+<polyline fill="none" stroke="#c0392b" stroke-width="3" stroke-dasharray="7,5" points="606.1904761904761,378.877632038619 844.2857142857143,335.1529202528027 1082.3809523809523,210.43478260869563"/>
+<circle cx="606.1904761904761" cy="378.877632038619" r="6" fill="#c0392b"/>
+<line x1="606.1904761904761" y1="385.33362975196104" x2="606.1904761904761" y2="367.6285451138565" stroke="#c0392b" stroke-width="2"/>
+<circle cx="844.2857142857143" cy="335.1529202528027" r="6" fill="#c0392b"/>
+<line x1="844.2857142857143" y1="342.8805538793787" x2="844.2857142857143" y2="328.40346809794517" stroke="#c0392b" stroke-width="2"/>
+<circle cx="1082.3809523809523" cy="210.43478260869563" r="6" fill="#c0392b"/>
+<line x1="1082.3809523809523" y1="215.52132626163166" x2="1082.3809523809523" y2="207.98932892939933" stroke="#c0392b" stroke-width="2"/>
+<polyline fill="none" stroke="#2c6fbb" stroke-width="3" stroke-dasharray="7,5" points="606.1904761904761,510.6386762790993 844.2857142857143,468.9681455838917 1082.3809523809523,384.35544828024257"/>
+<circle cx="606.1904761904761" cy="510.6386762790993" r="6" fill="#2c6fbb"/>
+<line x1="606.1904761904761" y1="511.5190396036459" x2="606.1904761904761" y2="509.0735859243497" stroke="#2c6fbb" stroke-width="2"/>
+<circle cx="844.2857142857143" cy="468.9681455838917" r="6" fill="#2c6fbb"/>
+<line x1="844.2857142857143" y1="471.02232667450056" x2="844.2857142857143" y2="440.992155492743" stroke="#2c6fbb" stroke-width="2"/>
+<circle cx="1082.3809523809523" cy="384.35544828024257" r="6" fill="#2c6fbb"/>
+<line x1="1082.3809523809523" y1="393.74599040874" x2="1082.3809523809523" y2="370.5630895290119" stroke="#2c6fbb" stroke-width="2"/>
+<line x1="130" y1="985" x2="176" y2="985" stroke="#c0392b" stroke-width="3" stroke-dasharray="none"/>
+<circle cx="153" cy="985" r="6" fill="#c0392b"/>
+<text x="192" y="990" font-family="Helvetica,Arial" font-size="17" fill="#1a1a1a">rspack @ 5k chunks  (+33.2 ms / 1000 modules, R²=0.994)</text>
+<line x1="130" y1="1017" x2="176" y2="1017" stroke="#2c6fbb" stroke-width="3" stroke-dasharray="none"/>
+<circle cx="153" cy="1017" r="6" fill="#2c6fbb"/>
+<text x="192" y="1022" font-family="Helvetica,Arial" font-size="17" fill="#1a1a1a">vite @ 5k chunks  (+26.5 ms / 1000 modules, R²=0.998)</text>
+<line x1="130" y1="1049" x2="176" y2="1049" stroke="#c0392b" stroke-width="3" stroke-dasharray="7,5"/>
+<circle cx="153" cy="1049" r="6" fill="#c0392b"/>
+<text x="192" y="1054" font-family="Helvetica,Arial" font-size="17" fill="#1a1a1a">rspack @ 10k chunks  (+34.4 ms / 1000 modules, R²=0.928)</text>
+<line x1="130" y1="1081" x2="176" y2="1081" stroke="#2c6fbb" stroke-width="3" stroke-dasharray="7,5"/>
+<circle cx="153" cy="1081" r="6" fill="#2c6fbb"/>
+<text x="192" y="1086" font-family="Helvetica,Arial" font-size="17" fill="#1a1a1a">vite @ 10k chunks  (+25.8 ms / 1000 modules, R²=0.963)</text>
+</svg>
