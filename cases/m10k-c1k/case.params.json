@@ -1,0 +1,9 @@
+{
+  "name": "m10k-c1k",
+  "seed": 1,
+  "targetModules": 10000,
+  "targetChunks": 1000,
+  "routes": 100,
+  "modulesPerVendor": 4,
+  "collisionVendors": 0
+}
