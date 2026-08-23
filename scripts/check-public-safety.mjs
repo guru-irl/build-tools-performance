@@ -88,6 +88,11 @@ const PUBLIC_HOSTS = new Set([
   // .github/renovate.json ($schema) -- allowlisted so touching that file
   // does not self-trigger the moment it is next edited (M2).
   'docs.renovatebot.com',
+  // The SVG XML namespace. Every SVG file is REQUIRED by spec to carry
+  // xmlns="http://www.w3.org/2000/svg", so the benchmark charts in
+  // docs/results/ and the script that writes them all contain it. It is a
+  // fixed, universally-public identifier, not a network dependency.
+  'www.w3.org',
   'localhost',
   '127.0.0.1',
   // RFC 2606 reserved documentation domains: never resolve to anything real,
