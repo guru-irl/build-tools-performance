@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,12 +28,25 @@ function findUp(rel) {
 // measures, so it must never be silently present in the default build.
 const loaderSpec = process.env.BENCH_LOADER;
 
+// Per-ASSET work, off unless BENCH_PLUGIN is set. Distinct from the loader dial
+// above: loader work happens during make, while this runs in the asset stage
+// over emitted bundles, which is where large real applications spend most of
+// their seal time. Registered at the processAssets stage matching the cost
+// shape being modelled.
+const pluginSpec = process.env.BENCH_PLUGIN;
+let assetPlugins = [];
+if (pluginSpec) {
+  const mod = await import(pathToFileURL(findUp(path.join('scripts', 'synthetic-plugin.mjs'))).href);
+  assetPlugins = [new mod.SyntheticAssetPlugin()];
+}
+
 export default {
   mode: 'production',
   context: __dirname,
   entry: { main: './src/index.jsx' },
   resolve: { extensions: ['.js', '.jsx'] },
   output: { path: path.join(__dirname, 'dist'), clean: true },
+  ...(assetPlugins.length ? { plugins: assetPlugins } : {}),
   ...(loaderSpec
     ? {
         module: {

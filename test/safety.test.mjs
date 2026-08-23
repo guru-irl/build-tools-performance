@@ -476,6 +476,13 @@ test('resolveDenylistFile resolves SAFETY_DENYLIST_FILE to an absolute path and 
   const dir = mkdtempSync(path.join(process.cwd(), '.tmp-safety-denylist-loc-'));
   const prev = process.env.SAFETY_DENYLIST_FILE;
   try {
+    // Establish the precondition rather than inheriting it. This test saved and
+    // restored the variable but never cleared it, so it asserted "unset
+    // resolves to null" while the variable might well be set -- and the
+    // documented way to USE this tool is `export SAFETY_DENYLIST_FILE=...`,
+    // which therefore broke the project's own suite for anyone following the
+    // documentation.
+    delete process.env.SAFETY_DENYLIST_FILE;
     assert.equal(resolveDenylistFile({ cwd: dir }), null, 'unset SAFETY_DENYLIST_FILE must resolve to null');
 
     process.env.SAFETY_DENYLIST_FILE = path.join(dir, 'inside.txt');

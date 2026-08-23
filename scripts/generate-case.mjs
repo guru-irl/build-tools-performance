@@ -15,7 +15,7 @@
  * collision-control test in test/build.test.mjs).
  */
 export function computeCaseShape({
-  targetModules, targetChunks, routes, modulesPerVendor, collisionVendors = 0,
+  targetModules, targetChunks, routes, modulesPerVendor, collisionVendors = 0, moduleBytes = 0,
 }) {
   // Each vendor writes modulesPerVendor files unconditionally (the leaf loop
   // runs k-1 times, plus index.js always). k <= 0 does not throw naturally:
@@ -79,6 +79,10 @@ export function computeCaseShape({
     modulesPerVendor,
     vendorModules,
     appModules,
+    // Approximate source bytes per generated leaf module. 0 (the default)
+    // means "emit the original bodies unchanged", which is what keeps every
+    // previously published case byte-identical.
+    moduleBytes,
     totalModules: vendorModules + appModules + routes + 1,
     totalChunks: cliques + routes + 1,
   };
@@ -214,11 +218,66 @@ import path from 'node:path';
 // Non-trivial body: real imports, a component, and enough surface that the
 // minifier and transformer have actual work to do. Files are block-padded to
 // 4 KB on disk anyway, so this weight is free.
-function vendorModuleBody(v, m) {
-  return `const PREFIX_${m} = 'v${v}_i${m}';
-export function compute${m}(input) {
+/**
+ * Deterministic filler code used by the module-size dial.
+ *
+ * Three properties matter, and each rules out a simpler implementation:
+ *
+ *  1. It must survive TREE-SHAKING. Padding that nothing references is deleted
+ *     before it reaches an output chunk, so the dial would move source bytes on
+ *     disk while leaving emitted bytes unchanged. Every generated helper is
+ *     therefore reachable from the module's exported entry point.
+ *  2. It must survive MINIFICATION. Constant expressions get folded, so the
+ *     helpers do arithmetic on their runtime argument rather than on literals.
+ *  3. It must be real CODE, not a blob of string literals. The point of this
+ *     dial is to give the asset stage genuine work -- parsing, renaming,
+ *     rewriting -- and an opaque string constant is copied through almost for
+ *     free while inflating byte counts, which would make the dial look
+ *     effective while modelling nothing.
+ *
+ * Returns roughly `count` helpers plus an aggregator that calls all of them.
+ */
+function fillerBody(tag, count) {
+  if (count <= 0) return { code: '', call: '' };
+  const helpers = Array.from({ length: count }, (_, j) => {
+    // Constants vary per helper so no two bodies are identical: identical
+    // bodies would let a minifier or bundler share a single copy, which would
+    // silently break the linearity of the dial.
+    const a = 3 + ((j * 7) % 61);
+    const b = 0x9e37 + j * 131;
+    return `function ${tag}_h${j}(x) {
+  const s${j} = ((x + ${a}) * ${a}) ^ ${b};
+  const t${j} = String(s${j}).split('').reverse().join('');
+  const u${j} = t${j}.charCodeAt(0) + ${j};
+  return { k: '${tag}_${j}', s: s${j}, t: t${j}, u: u${j} };
+}`;
+  }).join('\n');
+  const list = Array.from({ length: count }, (_, j) => `${tag}_h${j}(x)`).join(', ');
+  return {
+    code: `${helpers}\nfunction ${tag}_all(x) {\n  const rows = [${list}];\n  return rows.reduce((acc, r) => acc + r.u, 0);\n}\n`,
+    call: `${tag}_all`,
+  };
+}
+
+/**
+ * Number of filler helpers needed to reach `targetBytes` of source. Measured
+ * once against a real generated helper rather than guessed; see
+ * test/shape.test.mjs for the assertion that keeps this honest.
+ */
+const FILLER_BYTES_PER_HELPER = 190;
+
+export function fillerCountForBytes(targetBytes, baseBytes = 0) {
+  if (!targetBytes || targetBytes <= baseBytes) return 0;
+  return Math.max(0, Math.round((targetBytes - baseBytes) / FILLER_BYTES_PER_HELPER));
+}
+
+function vendorModuleBody(v, m, moduleBytes = 0) {
+  const base = `const PREFIX_${m} = 'v${v}_i${m}';
+`;
+  const filler = fillerBody(`f${v}_${m}`, fillerCountForBytes(moduleBytes, 400));
+  return `${base}${filler.code}export function compute${m}(input) {
   const parts = String(input).split('').map((c, i) => c.charCodeAt(0) + i);
-  const total = parts.reduce((a, b) => a + b, 0);
+  const total = parts.reduce((a, b) => a + b, 0)${filler.call ? ` + ${filler.call}(parts.length)` : ''};
   return { id: PREFIX_${m}, total, parts: parts.slice(0, 4) };
 }
 export const meta${m} = { name: PREFIX_${m}, version: '1.0.${m}', pure: true };
@@ -242,11 +301,12 @@ export default vendor${v};
 `;
 }
 
-function appComponentBody(i) {
+function appComponentBody(i, moduleBytes = 0) {
+  const filler = fillerBody(`c${i}`, fillerCountForBytes(moduleBytes, 400));
   return `import React from 'react';
 const LABEL_${i} = 'component_${i}';
-export function Component${i}({ value = ${i}, children }) {
-  const derived = React.useMemo(() => ({ label: LABEL_${i}, value, doubled: value * 2 }), [value]);
+${filler.code}export function Component${i}({ value = ${i}, children }) {
+  const derived = React.useMemo(() => ({ label: LABEL_${i}, value, doubled: value * 2${filler.call ? ` + ${filler.call}(value)` : ''} }), [value]);
   return React.createElement('div', { className: LABEL_${i}, 'data-value': derived.doubled }, children);
 }
 export default Component${i};
@@ -337,7 +397,7 @@ mount('root');
 // generateCase wrote it, so context/output.path are correct without templating.
 const RSPACK_CONFIG = `import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -365,12 +425,25 @@ function findUp(rel) {
 // measures, so it must never be silently present in the default build.
 const loaderSpec = process.env.BENCH_LOADER;
 
+// Per-ASSET work, off unless BENCH_PLUGIN is set. Distinct from the loader dial
+// above: loader work happens during make, while this runs in the asset stage
+// over emitted bundles, which is where large real applications spend most of
+// their seal time. Registered at the processAssets stage matching the cost
+// shape being modelled.
+const pluginSpec = process.env.BENCH_PLUGIN;
+let assetPlugins = [];
+if (pluginSpec) {
+  const mod = await import(pathToFileURL(findUp(path.join('scripts', 'synthetic-plugin.mjs'))).href);
+  assetPlugins = [new mod.SyntheticAssetPlugin()];
+}
+
 export default {
   mode: 'production',
   context: __dirname,
   entry: { main: './src/index.jsx' },
   resolve: { extensions: ['.js', '.jsx'] },
   output: { path: path.join(__dirname, 'dist'), clean: true },
+  ...(assetPlugins.length ? { plugins: assetPlugins } : {}),
   ...(loaderSpec
     ? {
         module: {
@@ -503,9 +576,36 @@ if (loaderSpec) {
   };
 }
 
+// Asset-stage work, mirroring the rspack config's BENCH_PLUGIN dial. Runs in
+// generateBundle, Rollup's equivalent of the emitted-asset stage, so both
+// tools do the same work at the same point in their pipelines.
+const pluginSpec = process.env.BENCH_PLUGIN;
+let assetPlugin = null;
+if (pluginSpec) {
+  const pcore = await import(pathToFileURL(findUp(path.join('scripts', 'plugin-core.mjs'))).href);
+  const spec = pcore.pluginSpecFromEnv();
+  assetPlugin = {
+    name: 'synthetic-asset',
+    async generateBundle(_options, bundle) {
+      const list = Object.entries(bundle).map(([name, item]) => ({
+        name,
+        source: item.type === 'chunk' ? item.code : String(item.source ?? ''),
+      }));
+      const changed = await pcore.applyAssetWork(list, spec);
+      for (const c of changed) {
+        const item = bundle[c.name];
+        if (!item) continue;
+        if (item.type === 'chunk') item.code = c.source;
+        else item.source = c.source;
+      }
+    },
+  };
+}
+const allPlugins = [syntheticPlugin, assetPlugin].filter(Boolean);
+
 export default defineConfig({
   root: __dirname,
-  ...(syntheticPlugin ? { plugins: [syntheticPlugin] } : {}),
+  ...(allPlugins.length ? { plugins: allPlugins } : {}),
   build: {
     // Build-time levers, identical in meaning and default to the ones in the
     // sibling rspack config: minify on, source maps off unless asked. Kept in
@@ -540,7 +640,7 @@ export default defineConfig({
 
 export function generateCase(params, outDir) {
   const shape = computeCaseShape(params);
-  const { routes, cliques, collisionVendors, modulesPerVendor: k, appModules } = shape;
+  const { routes, cliques, collisionVendors, modulesPerVendor: k, appModules, moduleBytes } = shape;
   const subsets = assignCliques(cliques, routes);
 
   // Regenerating into an existing outDir must not leave modules from a
@@ -557,7 +657,7 @@ export function generateCase(params, outDir) {
     const dir = path.join(outDir, `src/vendors/v${v}`);
     mkdirSync(dir, { recursive: true });
     for (let m = 0; m < k - 1; m++) {
-      writeFileSync(path.join(dir, `i${m}.js`), vendorModuleBody(v, m));
+      writeFileSync(path.join(dir, `i${m}.js`), vendorModuleBody(v, m, moduleBytes));
     }
     writeFileSync(path.join(dir, 'index.js'), vendorIndexBody(v, k));
     for (const r of subsets[v]) routeVendors[r].push(v);
@@ -579,7 +679,7 @@ export function generateCase(params, outDir) {
     const dir = path.join(outDir, `src/vendors/v${v}`);
     mkdirSync(dir, { recursive: true });
     for (let m = 0; m < k - 1; m++) {
-      writeFileSync(path.join(dir, `i${m}.js`), vendorModuleBody(v, m));
+      writeFileSync(path.join(dir, `i${m}.js`), vendorModuleBody(v, m, moduleBytes));
     }
     writeFileSync(path.join(dir, 'index.js'), vendorIndexBody(v, k));
     for (const r of subsets[0]) routeVendors[r].push(v);
@@ -589,7 +689,7 @@ export function generateCase(params, outDir) {
   // they add modules without creating new cliques.
   const routeComponents = Array.from({ length: routes }, () => []);
   for (let c = 0; c < appModules; c++) {
-    writeFileSync(path.join(outDir, `src/components/c${c}.jsx`), appComponentBody(c));
+    writeFileSync(path.join(outDir, `src/components/c${c}.jsx`), appComponentBody(c, moduleBytes));
     routeComponents[c % routes].push(c);
   }
 

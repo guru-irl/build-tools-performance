@@ -42,9 +42,36 @@ if (loaderSpec) {
   };
 }
 
+// Asset-stage work, mirroring the rspack config's BENCH_PLUGIN dial. Runs in
+// generateBundle, Rollup's equivalent of the emitted-asset stage, so both
+// tools do the same work at the same point in their pipelines.
+const pluginSpec = process.env.BENCH_PLUGIN;
+let assetPlugin = null;
+if (pluginSpec) {
+  const pcore = await import(pathToFileURL(findUp(path.join('scripts', 'plugin-core.mjs'))).href);
+  const spec = pcore.pluginSpecFromEnv();
+  assetPlugin = {
+    name: 'synthetic-asset',
+    async generateBundle(_options, bundle) {
+      const list = Object.entries(bundle).map(([name, item]) => ({
+        name,
+        source: item.type === 'chunk' ? item.code : String(item.source ?? ''),
+      }));
+      const changed = await pcore.applyAssetWork(list, spec);
+      for (const c of changed) {
+        const item = bundle[c.name];
+        if (!item) continue;
+        if (item.type === 'chunk') item.code = c.source;
+        else item.source = c.source;
+      }
+    },
+  };
+}
+const allPlugins = [syntheticPlugin, assetPlugin].filter(Boolean);
+
 export default defineConfig({
   root: __dirname,
-  ...(syntheticPlugin ? { plugins: [syntheticPlugin] } : {}),
+  ...(allPlugins.length ? { plugins: allPlugins } : {}),
   build: {
     // Build-time levers, identical in meaning and default to the ones in the
     // sibling rspack config: minify on, source maps off unless asked. Kept in

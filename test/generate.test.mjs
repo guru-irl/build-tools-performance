@@ -269,7 +269,7 @@ test('emitted vite.config.mjs source contains no manualChunks or advancedChunks 
   }
 });
 
-test('emitted vite.config.mjs registers no plugins unless a loader category is requested', async () => {
+test('emitted vite.config.mjs registers no plugins unless a dial is requested', async () => {
   // Structural + behavioural guard. The only pre-existing guard against a
   // transform plugin was `assert.ok(!cfg.plugins || cfg.plugins.length === 0)`
   // in test/build.test.mjs, which only inspects the TOP-level `plugins` array
@@ -280,47 +280,58 @@ test('emitted vite.config.mjs registers no plugins unless a loader category is r
   // placed there fired on 404 modules for a 400-source-module case while every
   // pre-existing build.test.mjs assertion stayed green).
   //
-  // The benchmark now ships an OPTIONAL synthetic transform plugin, enabled
-  // only by BENCH_LOADER, so "no plugins ever" is no longer the right
-  // invariant. The invariant that matters is unchanged: the DEFAULT build must
-  // carry no per-module transform, because one would be a loader-speed
-  // confound between the two tools. So this asserts both directions -- absent
-  // when unset, present when asked -- and additionally pins the source text so
-  // an unconditional plugin registration cannot creep back in at any nesting
-  // depth.
+  // The benchmark ships two OPTIONAL dials that register plugins -- a
+  // per-module loader (BENCH_LOADER) and a per-asset plugin (BENCH_PLUGIN) --
+  // so "no plugins ever" is not the invariant. The invariant is that the
+  // DEFAULT build carries neither, because either one is a confound between
+  // the two tools. All four combinations are checked so that enabling one dial
+  // cannot silently enable the other.
   const dir = mkdtempSync(path.join(process.cwd(), '.tmp-gen-'));
-  const prev = process.env.BENCH_LOADER;
+  const prevLoader = process.env.BENCH_LOADER;
+  const prevPlugin = process.env.BENCH_PLUGIN;
+  const load = async () =>
+    (await import(pathToFileURL(path.join(dir, 'vite.config.mjs')).href + '?d=' + Date.now() + Math.random())).default;
   try {
     delete process.env.BENCH_LOADER;
+    delete process.env.BENCH_PLUGIN;
     generateCase(PARAMS, dir);
     const src = readFileSync(path.join(dir, 'vite.config.mjs'), 'utf8');
 
-    // Exactly one `plugins:` in the source, and it must be inside the guard.
+    // Exactly one `plugins:` registration in the source, and it must be gated.
     const occurrences = src.match(/plugins:/g) ?? [];
     assert.equal(occurrences.length, 1, 'expected exactly one plugins registration in the emitted config');
     assert.match(
       src,
-      /\.\.\.\(syntheticPlugin \? \{ plugins: \[syntheticPlugin\] \} : \{\}\)/,
-      'the sole plugins registration must be gated on the synthetic loader being requested'
+      /\.\.\.\(allPlugins\.length \? \{ plugins: allPlugins \} : \{\}\)/,
+      'the sole plugins registration must be gated on a dial being requested'
     );
 
-    // Behavioural: with no category requested, no plugin exists anywhere.
-    const off = (await import(pathToFileURL(path.join(dir, 'vite.config.mjs')).href + '?d=' + Date.now())).default;
+    const off = await load();
     assert.ok(!off.plugins || off.plugins.length === 0, 'default config must register no top-level plugins');
     assert.ok(
       !off.build?.rollupOptions?.plugins || off.build.rollupOptions.plugins.length === 0,
       'default config must register no nested rollupOptions plugins either'
     );
 
-    // Behavioural, other direction: a check that cannot fail is not a check,
-    // so prove the gate actually opens when a category IS requested.
+    // A check that cannot fail is not a check: prove each gate opens, and that
+    // opening one does not open the other.
     process.env.BENCH_LOADER = 'noop';
-    const on = (await import(pathToFileURL(path.join(dir, 'vite.config.mjs')).href + '?d=' + Date.now())).default;
-    assert.equal(on.plugins?.length, 1, 'BENCH_LOADER must enable exactly one synthetic plugin');
-    assert.equal(on.plugins[0].name, 'synthetic-transform');
+    const loaderOnly = await load();
+    assert.deepEqual(loaderOnly.plugins.map((p) => p.name), ['synthetic-transform']);
+
+    delete process.env.BENCH_LOADER;
+    process.env.BENCH_PLUGIN = 'asset-scan';
+    const pluginOnly = await load();
+    assert.deepEqual(pluginOnly.plugins.map((p) => p.name), ['synthetic-asset']);
+
+    process.env.BENCH_LOADER = 'noop';
+    const both = await load();
+    assert.deepEqual(both.plugins.map((p) => p.name), ['synthetic-transform', 'synthetic-asset']);
   } finally {
-    if (prev === undefined) delete process.env.BENCH_LOADER;
-    else process.env.BENCH_LOADER = prev;
+    if (prevLoader === undefined) delete process.env.BENCH_LOADER;
+    else process.env.BENCH_LOADER = prevLoader;
+    if (prevPlugin === undefined) delete process.env.BENCH_PLUGIN;
+    else process.env.BENCH_PLUGIN = prevPlugin;
     rmSync(dir, { recursive: true, force: true });
   }
 });
