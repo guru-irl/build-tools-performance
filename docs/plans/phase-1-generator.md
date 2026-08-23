@@ -824,6 +824,8 @@ git commit -m "feat: add collision merge and module-axis orthogonality controls"
 
 - [ ] **Step 1: Write the failing test**
 
+<!-- safety-check: ignore-next-block -- this fenced block quotes the Task 7 brief's own test/safety.test.mjs fixtures verbatim (RFC-2606 .invalid hosts, an obviously-fake abc123 placeholder), not a real leak; see C3 in .superpowers/sdd/task-7-fix-report.md and docs/public-safety.md -->
+
 ```js
 // test/safety.test.mjs
 import { test } from 'node:test';

@@ -20,3 +20,9 @@ tsconfig.tsbuildinfo
 
 # local agent-tool state/memory database, never commit
 .spider/
+
+# conventional local name for SAFETY_DENYLIST_FILE, never commit (the
+# checker also refuses to run if this env var resolves inside the repo
+# at all -- see docs/public-safety.md -- but this stops it being added
+# by accident even before that check runs)
+.safety-denylist
