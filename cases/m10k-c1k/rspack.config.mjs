@@ -1,7 +1,32 @@
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Locates scripts/synthetic-loader.mjs by walking upward from this config.
+// Deliberately NOT an absolute path baked in at generation time: cases are
+// committed to a public repository, and a generated absolute path would
+// publish the generating machine's directory layout. Walking up also keeps
+// committed cases and on-demand generated cases working from any depth.
+function findUp(rel) {
+  let dir = __dirname;
+  for (let i = 0; i < 8; i++) {
+    const candidate = path.join(dir, rel);
+    if (existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error('could not locate ' + rel + ' above ' + __dirname);
+}
+
+// Per-module loader work, off unless BENCH_LOADER is set. When it is unset the
+// module.rules entry is omitted ENTIRELY rather than pointing at a loader that
+// returns its input: a JS loader that does nothing still costs a boundary
+// crossing per module, and that crossing is one of the things this benchmark
+// measures, so it must never be silently present in the default build.
+const loaderSpec = process.env.BENCH_LOADER;
 
 export default {
   mode: 'production',
@@ -9,10 +34,35 @@ export default {
   entry: { main: './src/index.jsx' },
   resolve: { extensions: ['.js', '.jsx'] },
   output: { path: path.join(__dirname, 'dist'), clean: true },
+  ...(loaderSpec
+    ? {
+        module: {
+          rules: [
+            {
+              test: /\.jsx?$/,
+              use: [{ loader: findUp(path.join('scripts', 'synthetic-loader.mjs')) }],
+            },
+          ],
+        },
+      }
+    : {}),
+  // Build-time levers. Both DEFAULT to the mandatory benchmark configuration
+  // (minify on, source maps off), so an unset environment reproduces the
+  // published numbers exactly. They exist only so a controlled experiment can
+  // vary one factor at a time against the same checked-in case, without
+  // regenerating sources. Never publish a headline build time with a
+  // non-default lever set.
+  // Off by default. Turning this on is what BENCH_SOURCEMAP measures: source
+  // map generation is not a fixed add-on cost, it also inflates the cost of
+  // minification, because the minifier must additionally track and remap
+  // every position it rewrites.
+  devtool: process.env.BENCH_SOURCEMAP === '1' ? 'source-map' : false,
   optimization: {
-    // Minification is mandatory: with it off, per-chunk cost is understated
-    // by orders of magnitude and the benchmark measures the wrong thing.
-    minimize: true,
+    // Minification is mandatory in the default configuration: with it off,
+    // per-chunk cost is understated by orders of magnitude and the benchmark
+    // measures the wrong thing. BENCH_MINIFY=0 exists only to size that
+    // effect deliberately, never to make the benchmark look fast.
+    minimize: process.env.BENCH_MINIFY !== '0',
     splitChunks: {
       chunks: 'all',
       // minSize: 0 is required at both levels below. A nonzero minSize

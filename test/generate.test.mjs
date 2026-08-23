@@ -269,31 +269,58 @@ test('emitted vite.config.mjs source contains no manualChunks or advancedChunks 
   }
 });
 
-test('emitted vite.config.mjs source contains no plugins configuration at any nesting level', () => {
-  // Structural guard. The only pre-existing guard against a transform plugin
-  // was `assert.ok(!cfg.plugins || cfg.plugins.length === 0)` in
-  // test/build.test.mjs, which only inspects the TOP-level `plugins` array on
-  // the loaded config object. A real per-module transform plugin registered
-  // at `build.rollupOptions.plugins` (a legal Rollup config location,
-  // distinct from Vite's top-level `plugins`) is invisible to that check
-  // while firing on every module Rollup processes (confirmed directly this
-  // session: a `transform` hook placed there fired on 404 modules for a
-  // 400-source-module case, while every pre-existing build.test.mjs
-  // assertion stayed green). Zero transform plugins is deliberate: generated
-  // components use React.createElement, not JSX, so any transform is a
-  // loader-speed confound between the two tools. Scanning the raw emitted
-  // source text for the `plugins` token catches it at any nesting depth,
-  // present or future, not just the one location a config object happens to
-  // be inspected at.
+test('emitted vite.config.mjs registers no plugins unless a loader category is requested', async () => {
+  // Structural + behavioural guard. The only pre-existing guard against a
+  // transform plugin was `assert.ok(!cfg.plugins || cfg.plugins.length === 0)`
+  // in test/build.test.mjs, which only inspects the TOP-level `plugins` array
+  // on the loaded config object. A real per-module transform plugin registered
+  // at `build.rollupOptions.plugins` (a legal Rollup config location, distinct
+  // from Vite's top-level `plugins`) is invisible to that check while firing
+  // on every module Rollup processes (confirmed directly: a `transform` hook
+  // placed there fired on 404 modules for a 400-source-module case while every
+  // pre-existing build.test.mjs assertion stayed green).
+  //
+  // The benchmark now ships an OPTIONAL synthetic transform plugin, enabled
+  // only by BENCH_LOADER, so "no plugins ever" is no longer the right
+  // invariant. The invariant that matters is unchanged: the DEFAULT build must
+  // carry no per-module transform, because one would be a loader-speed
+  // confound between the two tools. So this asserts both directions -- absent
+  // when unset, present when asked -- and additionally pins the source text so
+  // an unconditional plugin registration cannot creep back in at any nesting
+  // depth.
   const dir = mkdtempSync(path.join(process.cwd(), '.tmp-gen-'));
+  const prev = process.env.BENCH_LOADER;
   try {
+    delete process.env.BENCH_LOADER;
     generateCase(PARAMS, dir);
     const src = readFileSync(path.join(dir, 'vite.config.mjs'), 'utf8');
-    assert.doesNotMatch(
-      src, /plugins/,
-      'vite.config.mjs must not configure any plugins, top-level or nested -- a transform plugin is a loader-speed confound this benchmark deliberately excludes'
+
+    // Exactly one `plugins:` in the source, and it must be inside the guard.
+    const occurrences = src.match(/plugins:/g) ?? [];
+    assert.equal(occurrences.length, 1, 'expected exactly one plugins registration in the emitted config');
+    assert.match(
+      src,
+      /\.\.\.\(syntheticPlugin \? \{ plugins: \[syntheticPlugin\] \} : \{\}\)/,
+      'the sole plugins registration must be gated on the synthetic loader being requested'
     );
+
+    // Behavioural: with no category requested, no plugin exists anywhere.
+    const off = (await import(pathToFileURL(path.join(dir, 'vite.config.mjs')).href + '?d=' + Date.now())).default;
+    assert.ok(!off.plugins || off.plugins.length === 0, 'default config must register no top-level plugins');
+    assert.ok(
+      !off.build?.rollupOptions?.plugins || off.build.rollupOptions.plugins.length === 0,
+      'default config must register no nested rollupOptions plugins either'
+    );
+
+    // Behavioural, other direction: a check that cannot fail is not a check,
+    // so prove the gate actually opens when a category IS requested.
+    process.env.BENCH_LOADER = 'noop';
+    const on = (await import(pathToFileURL(path.join(dir, 'vite.config.mjs')).href + '?d=' + Date.now())).default;
+    assert.equal(on.plugins?.length, 1, 'BENCH_LOADER must enable exactly one synthetic plugin');
+    assert.equal(on.plugins[0].name, 'synthetic-transform');
   } finally {
+    if (prev === undefined) delete process.env.BENCH_LOADER;
+    else process.env.BENCH_LOADER = prev;
     rmSync(dir, { recursive: true, force: true });
   }
 });

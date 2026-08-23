@@ -1,0 +1,17 @@
+case,tool,lever,maps,minify,runs,medianMs,minMs,maxMs,spreadPct,chunks
+m10k-c1k,rspack,base,false,true,15,493,479,519,8.1,1000
+m10k-c1k,rspack,maps,true,true,15,617,604,647,7,1000
+m10k-c1k,rspack,nomin,false,false,15,500,470,519,9.8,1000
+m10k-c1k,rspack,maps-nomin,true,false,15,590,570,602,5.4,1000
+m10k-c1k,vite,base,false,true,15,491,480,527,9.6,901
+m10k-c1k,vite,maps,true,true,15,575,552,591,6.8,901
+m10k-c1k,vite,nomin,false,false,15,470,455,484,6.2,901
+m10k-c1k,vite,maps-nomin,true,false,15,546,512,565,9.7,901
+m50k-c1k,rspack,base,false,true,15,2328,2192,2726,22.9,1000
+m50k-c1k,rspack,maps,true,true,15,3091,2535,3641,35.8,1000
+m50k-c1k,rspack,nomin,false,false,15,2136,2010,2464,21.3,1000
+m50k-c1k,rspack,maps-nomin,true,false,15,2039,1995,2095,4.9,1000
+m50k-c1k,vite,base,false,true,15,1688,1616,1942,19.3,862
+m50k-c1k,vite,maps,true,true,15,1843,1772,1976,11.1,862
+m50k-c1k,vite,nomin,false,false,15,1675,1536,1811,16.4,862
+m50k-c1k,vite,maps-nomin,true,false,15,1875,1821,2073,13.4,862

@@ -1,0 +1,383 @@
+{
+  "env": {
+    "cpuModel": "Apple M5 Pro",
+    "logicalCores": 18,
+    "physicalCores": 18,
+    "memGB": 48,
+    "loadavg": [
+      12.84,
+      9.25,
+      9.99
+    ],
+    "platform": "darwin",
+    "release": "25.6.0",
+    "arch": "arm64",
+    "node": "v22.23.1",
+    "rspack": "2.1.10",
+    "vite": "8.2.1",
+    "timestamp": "2026-08-23T09:20:57.582Z"
+  },
+  "runs": 3,
+  "results": [
+    {
+      "case": "m10k-c1k",
+      "tool": "rspack",
+      "category": "(no loader)",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        543,
+        540,
+        577
+      ],
+      "medianMs": 543,
+      "minMs": 540,
+      "maxMs": 577,
+      "spreadPct": 6.8,
+      "chunks": 1000,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "rspack",
+      "category": "noop",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        742,
+        724,
+        740
+      ],
+      "medianMs": 740,
+      "minMs": 724,
+      "maxMs": 742,
+      "spreadPct": 2.4,
+      "chunks": 1000,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "rspack",
+      "category": "cpu:1000",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        767,
+        776,
+        737
+      ],
+      "medianMs": 767,
+      "minMs": 737,
+      "maxMs": 776,
+      "spreadPct": 5.1,
+      "chunks": 1000,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "rspack",
+      "category": "cpu:10000",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        842,
+        844,
+        856
+      ],
+      "medianMs": 844,
+      "minMs": 842,
+      "maxMs": 856,
+      "spreadPct": 1.7,
+      "chunks": 1000,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "rspack",
+      "category": "regex",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        772,
+        817,
+        732
+      ],
+      "medianMs": 772,
+      "minMs": 732,
+      "maxMs": 817,
+      "spreadPct": 11,
+      "chunks": 1000,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "rspack",
+      "category": "parse-native",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        1101,
+        1112,
+        1089
+      ],
+      "medianMs": 1101,
+      "minMs": 1089,
+      "maxMs": 1112,
+      "spreadPct": 2.1,
+      "chunks": 1000,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "rspack",
+      "category": "parse-js",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        997,
+        1000,
+        989
+      ],
+      "medianMs": 997,
+      "minMs": 989,
+      "maxMs": 1000,
+      "spreadPct": 1.1,
+      "chunks": 1000,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "rspack",
+      "category": "transform-native",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        1059,
+        1055,
+        1055
+      ],
+      "medianMs": 1055,
+      "minMs": 1055,
+      "maxMs": 1059,
+      "spreadPct": 0.4,
+      "chunks": 1000,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "rspack",
+      "category": "transform-js",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        1125,
+        1090,
+        1148
+      ],
+      "medianMs": 1125,
+      "minMs": 1090,
+      "maxMs": 1148,
+      "spreadPct": 5.2,
+      "chunks": 1000,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "rspack",
+      "category": "emit:1",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        1463,
+        1494,
+        1428
+      ],
+      "medianMs": 1463,
+      "minMs": 1428,
+      "maxMs": 1494,
+      "spreadPct": 4.5,
+      "chunks": 1000,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "vite",
+      "category": "(no loader)",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        465,
+        507,
+        480
+      ],
+      "medianMs": 480,
+      "minMs": 465,
+      "maxMs": 507,
+      "spreadPct": 8.8,
+      "chunks": 901,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "vite",
+      "category": "noop",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        528,
+        520,
+        520
+      ],
+      "medianMs": 520,
+      "minMs": 520,
+      "maxMs": 528,
+      "spreadPct": 1.5,
+      "chunks": 901,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "vite",
+      "category": "cpu:1000",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        564,
+        566,
+        566
+      ],
+      "medianMs": 566,
+      "minMs": 564,
+      "maxMs": 566,
+      "spreadPct": 0.4,
+      "chunks": 901,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "vite",
+      "category": "cpu:10000",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        827,
+        879,
+        828
+      ],
+      "medianMs": 828,
+      "minMs": 827,
+      "maxMs": 879,
+      "spreadPct": 6.3,
+      "chunks": 901,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "vite",
+      "category": "regex",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        583,
+        592,
+        594
+      ],
+      "medianMs": 592,
+      "minMs": 583,
+      "maxMs": 594,
+      "spreadPct": 1.9,
+      "chunks": 901,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "vite",
+      "category": "parse-native",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        1143,
+        1132,
+        1119
+      ],
+      "medianMs": 1132,
+      "minMs": 1119,
+      "maxMs": 1143,
+      "spreadPct": 2.1,
+      "chunks": 901,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "vite",
+      "category": "parse-js",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        1004,
+        976,
+        971
+      ],
+      "medianMs": 976,
+      "minMs": 971,
+      "maxMs": 1004,
+      "spreadPct": 3.4,
+      "chunks": 901,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "vite",
+      "category": "transform-native",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        1076,
+        1083,
+        1079
+      ],
+      "medianMs": 1079,
+      "minMs": 1076,
+      "maxMs": 1083,
+      "spreadPct": 0.6,
+      "chunks": 901,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "vite",
+      "category": "transform-js",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        1125,
+        1125,
+        1140
+      ],
+      "medianMs": 1125,
+      "minMs": 1125,
+      "maxMs": 1140,
+      "spreadPct": 1.3,
+      "chunks": 901,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "vite",
+      "category": "emit:1",
+      "modules": 10000,
+      "runs": 3,
+      "samples": [
+        1267,
+        1300,
+        1308
+      ],
+      "medianMs": 1300,
+      "minMs": 1267,
+      "maxMs": 1308,
+      "spreadPct": 3.2,
+      "chunks": 901,
+      "error": null
+    }
+  ]
+}

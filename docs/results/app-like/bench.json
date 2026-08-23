@@ -1,0 +1,383 @@
+{
+  "env": {
+    "cpuModel": "Apple M5 Pro",
+    "logicalCores": 18,
+    "physicalCores": 18,
+    "memGB": 48,
+    "loadavg": [
+      11.9,
+      12.64,
+      12.08
+    ],
+    "platform": "darwin",
+    "release": "25.6.0",
+    "arch": "arm64",
+    "node": "v22.23.1",
+    "rspack": "2.1.10",
+    "vite": "8.2.1",
+    "timestamp": "2026-08-23T09:13:01.854Z"
+  },
+  "runs": 3,
+  "results": [
+    {
+      "case": "m10k-c1k",
+      "tool": "rspack",
+      "targetModules": 10000,
+      "targetChunks": 1000,
+      "routes": 100,
+      "modulesPerVendor": 4,
+      "chunks": 1000,
+      "runs": 3,
+      "samples": [
+        626,
+        625,
+        640
+      ],
+      "medianMs": 626,
+      "minMs": 625,
+      "maxMs": 640,
+      "spreadPct": 2.4,
+      "error": null
+    },
+    {
+      "case": "m10k-c1k",
+      "tool": "vite",
+      "targetModules": 10000,
+      "targetChunks": 1000,
+      "routes": 100,
+      "modulesPerVendor": 4,
+      "chunks": 901,
+      "runs": 3,
+      "samples": [
+        595,
+        587,
+        584
+      ],
+      "medianMs": 587,
+      "minMs": 584,
+      "maxMs": 595,
+      "spreadPct": 1.9,
+      "error": null
+    },
+    {
+      "case": "m50k-c1k",
+      "tool": "rspack",
+      "targetModules": 50000,
+      "targetChunks": 1000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 1000,
+      "runs": 3,
+      "samples": [
+        2099,
+        2018,
+        1937
+      ],
+      "medianMs": 2018,
+      "minMs": 1937,
+      "maxMs": 2099,
+      "spreadPct": 8,
+      "error": null
+    },
+    {
+      "case": "m50k-c1k",
+      "tool": "vite",
+      "targetModules": 50000,
+      "targetChunks": 1000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 862,
+      "runs": 3,
+      "samples": [
+        1745,
+        1669,
+        1641
+      ],
+      "medianMs": 1669,
+      "minMs": 1641,
+      "maxMs": 1745,
+      "spreadPct": 6.2,
+      "error": null
+    },
+    {
+      "case": "m25k-c5k",
+      "tool": "rspack",
+      "targetModules": 25000,
+      "targetChunks": 5000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 5000,
+      "runs": 3,
+      "samples": [
+        2663,
+        2651,
+        2565
+      ],
+      "medianMs": 2651,
+      "minMs": 2565,
+      "maxMs": 2663,
+      "spreadPct": 3.7,
+      "error": null
+    },
+    {
+      "case": "m25k-c5k",
+      "tool": "vite",
+      "targetModules": 25000,
+      "targetChunks": 5000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 4701,
+      "runs": 3,
+      "samples": [
+        2218,
+        2207,
+        2155
+      ],
+      "medianMs": 2207,
+      "minMs": 2155,
+      "maxMs": 2218,
+      "spreadPct": 2.9,
+      "error": null
+    },
+    {
+      "case": "m50k-c5k",
+      "tool": "rspack",
+      "targetModules": 50000,
+      "targetChunks": 5000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 5000,
+      "runs": 3,
+      "samples": [
+        3326,
+        3474,
+        3397
+      ],
+      "medianMs": 3397,
+      "minMs": 3326,
+      "maxMs": 3474,
+      "spreadPct": 4.4,
+      "error": null
+    },
+    {
+      "case": "m50k-c5k",
+      "tool": "vite",
+      "targetModules": 50000,
+      "targetChunks": 5000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 4701,
+      "runs": 3,
+      "samples": [
+        3040,
+        3053,
+        3009
+      ],
+      "medianMs": 3040,
+      "minMs": 3009,
+      "maxMs": 3053,
+      "spreadPct": 1.4,
+      "error": null
+    },
+    {
+      "case": "m75k-c5k",
+      "tool": "rspack",
+      "targetModules": 75000,
+      "targetChunks": 5000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 5000,
+      "runs": 3,
+      "samples": [
+        4240,
+        4132,
+        4115
+      ],
+      "medianMs": 4132,
+      "minMs": 4115,
+      "maxMs": 4240,
+      "spreadPct": 3,
+      "error": null
+    },
+    {
+      "case": "m75k-c5k",
+      "tool": "vite",
+      "targetModules": 75000,
+      "targetChunks": 5000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 4701,
+      "runs": 3,
+      "samples": [
+        3519,
+        3679,
+        3711
+      ],
+      "medianMs": 3679,
+      "minMs": 3519,
+      "maxMs": 3711,
+      "spreadPct": 5.2,
+      "error": null
+    },
+    {
+      "case": "m100k-c5k",
+      "tool": "rspack",
+      "targetModules": 100000,
+      "targetChunks": 5000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 5000,
+      "runs": 3,
+      "samples": [
+        4947,
+        5517,
+        5717
+      ],
+      "medianMs": 5517,
+      "minMs": 4947,
+      "maxMs": 5717,
+      "spreadPct": 14,
+      "error": null
+    },
+    {
+      "case": "m100k-c5k",
+      "tool": "vite",
+      "targetModules": 100000,
+      "targetChunks": 5000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 4701,
+      "runs": 3,
+      "samples": [
+        4491,
+        4626,
+        4638
+      ],
+      "medianMs": 4626,
+      "minMs": 4491,
+      "maxMs": 4638,
+      "spreadPct": 3.2,
+      "error": null
+    },
+    {
+      "case": "m50k-c10k",
+      "tool": "rspack",
+      "targetModules": 50000,
+      "targetChunks": 10000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 10000,
+      "runs": 3,
+      "samples": [
+        7394,
+        7542,
+        7186
+      ],
+      "medianMs": 7394,
+      "minMs": 7186,
+      "maxMs": 7542,
+      "spreadPct": 4.8,
+      "error": null
+    },
+    {
+      "case": "m50k-c10k",
+      "tool": "vite",
+      "targetModules": 50000,
+      "targetChunks": 10000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 9701,
+      "runs": 3,
+      "samples": [
+        4955,
+        4970,
+        4798
+      ],
+      "medianMs": 4955,
+      "minMs": 4798,
+      "maxMs": 4970,
+      "spreadPct": 3.5,
+      "error": null
+    },
+    {
+      "case": "m75k-c10k",
+      "tool": "rspack",
+      "targetModules": 75000,
+      "targetChunks": 10000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 10000,
+      "runs": 3,
+      "samples": [
+        7720,
+        7435,
+        7707
+      ],
+      "medianMs": 7707,
+      "minMs": 7435,
+      "maxMs": 7720,
+      "spreadPct": 3.7,
+      "error": null
+    },
+    {
+      "case": "m75k-c10k",
+      "tool": "vite",
+      "targetModules": 75000,
+      "targetChunks": 10000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 9701,
+      "runs": 3,
+      "samples": [
+        5328,
+        5494,
+        5538
+      ],
+      "medianMs": 5494,
+      "minMs": 5328,
+      "maxMs": 5538,
+      "spreadPct": 3.8,
+      "error": null
+    },
+    {
+      "case": "m100k-c10k",
+      "tool": "rspack",
+      "targetModules": 100000,
+      "targetChunks": 10000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 10000,
+      "runs": 3,
+      "samples": [
+        7910,
+        8192,
+        9740
+      ],
+      "medianMs": 8192,
+      "minMs": 7910,
+      "maxMs": 9740,
+      "spreadPct": 22.3,
+      "error": null
+    },
+    {
+      "case": "m100k-c10k",
+      "tool": "vite",
+      "targetModules": 100000,
+      "targetChunks": 10000,
+      "routes": 300,
+      "modulesPerVendor": 4,
+      "chunks": 9701,
+      "runs": 3,
+      "samples": [
+        7120,
+        6195,
+        7234
+      ],
+      "medianMs": 7120,
+      "minMs": 6195,
+      "maxMs": 7234,
+      "spreadPct": 14.6,
+      "error": null
+    }
+  ]
+}

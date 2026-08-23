@@ -18,7 +18,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { cpus, totalmem, platform, release, arch } from 'node:os';
+import { cpus, totalmem, platform, release, arch, loadavg } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,9 +29,12 @@ const RUNNER = path.join(ROOT, 'scripts', 'bench-run-one.mjs');
 export const GRID = [
   { name: 'm10k-c1k', targetModules: 10000, targetChunks: 1000, routes: 100, modulesPerVendor: 4 },
   { name: 'm50k-c1k', targetModules: 50000, targetChunks: 1000, routes: 300, modulesPerVendor: 4 },
+  { name: 'm25k-c5k', targetModules: 25000, targetChunks: 5000, routes: 300, modulesPerVendor: 4 },
   { name: 'm50k-c5k', targetModules: 50000, targetChunks: 5000, routes: 300, modulesPerVendor: 4 },
-  { name: 'm50k-c10k', targetModules: 50000, targetChunks: 10000, routes: 300, modulesPerVendor: 4 },
+  { name: 'm75k-c5k', targetModules: 75000, targetChunks: 5000, routes: 300, modulesPerVendor: 4 },
   { name: 'm100k-c5k', targetModules: 100000, targetChunks: 5000, routes: 300, modulesPerVendor: 4 },
+  { name: 'm50k-c10k', targetModules: 50000, targetChunks: 10000, routes: 300, modulesPerVendor: 4 },
+  { name: 'm75k-c10k', targetModules: 75000, targetChunks: 10000, routes: 300, modulesPerVendor: 4 },
   { name: 'm100k-c10k', targetModules: 100000, targetChunks: 10000, routes: 300, modulesPerVendor: 4 },
 ];
 
@@ -62,6 +65,12 @@ export function envFingerprint() {
     logicalCores: c.length,
     physicalCores: physical,
     memGB: Math.round(totalmem() / 1024 ** 3),
+    // Load average at capture time. Recorded because a busy machine inflates
+    // spread without moving the median much: two 10-run passes of an identical
+    // configuration produced medians 519 ms and 520 ms (0.2% apart) while one
+    // pass showed 38.5% spread from a single outlier. Without this field a
+    // reader cannot tell a noisy run from a real regression.
+    loadavg: loadavg().map((x) => +x.toFixed(2)),
     platform: platform(),
     release: release(),
     arch: arch(),
@@ -211,13 +220,16 @@ export async function measure({ grid = GRID, runs = 3, tools = ['rspack', 'vite'
 
 if (import.meta.url === pathToFileURLSafe(process.argv[1])) {
   const runs = Number(process.env.BENCH_RUNS || 3);
+  // Large cases with source maps enabled can exceed the default 8 GB heap.
+  const heapMB = Number(process.env.BENCH_HEAP_MB || 8192);
   const only = process.env.BENCH_CASES ? process.env.BENCH_CASES.split(',') : null;
   const grid = only ? GRID.filter((g) => only.includes(g.name)) : GRID;
   const env = envFingerprint();
   console.log(`benchmark: ${grid.length} case(s) x ${runs} run(s) + 1 discarded warmup`);
   console.log(`  ${env.cpuModel}, ${env.physicalCores ?? env.logicalCores} cores, ${env.memGB} GB, node ${env.node}`);
-  console.log(`  rspack ${env.rspack}, vite ${env.vite}\n`);
-  await measure({ grid, runs, outDir: path.join(ROOT, 'docs', 'results') });
+  console.log(`  rspack ${env.rspack}, vite ${env.vite}, heap ${heapMB} MB, loadavg ${env.loadavg.join('/')}`);
+  console.log(`  levers: BENCH_SOURCEMAP=${process.env.BENCH_SOURCEMAP ?? '<unset>'} BENCH_MINIFY=${process.env.BENCH_MINIFY ?? '<unset>'}\n`);
+  await measure({ grid, runs, heapMB, outDir: path.join(ROOT, 'docs', 'results') });
 }
 
 function pathToFileURLSafe(p) {

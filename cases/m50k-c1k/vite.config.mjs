@@ -1,18 +1,63 @@
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { defineConfig } from 'vite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// See the sibling rspack config for why this walks upward instead of baking
+// in an absolute path at generation time.
+function findUp(rel) {
+  let dir = __dirname;
+  for (let i = 0; i < 8; i++) {
+    const candidate = path.join(dir, rel);
+    if (existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error('could not locate ' + rel + ' above ' + __dirname);
+}
+
+// Per-module transform work, off unless BENCH_LOADER is set. Runs the SAME
+// loader-core work as the rspack loader, so any cross-tool difference is a
+// property of the bundlers rather than of two different implementations.
+const loaderSpec = process.env.BENCH_LOADER;
+let syntheticPlugin = null;
+if (loaderSpec) {
+  const core = await import(pathToFileURL(findUp(path.join('scripts', 'loader-core.mjs'))).href);
+  const spec = core.specFromEnv();
+  syntheticPlugin = {
+    name: 'synthetic-transform',
+    async transform(code, id) {
+      if (!/\.jsx?$/.test(id)) return null;
+      const emitted = [];
+      const host = {
+        emit: (index, content) => {
+          emitted.push(this.emitFile({ type: 'asset', fileName: 'synthetic/' + id.replace(/[^a-zA-Z0-9]+/g, '_') + '.' + index + '.txt', source: content }));
+        },
+      };
+      return { code: await core.applyWork(code, spec, host), map: null };
+    },
+  };
+}
+
 export default defineConfig({
   root: __dirname,
+  ...(syntheticPlugin ? { plugins: [syntheticPlugin] } : {}),
   build: {
-    // Minification is mandatory, for the same reason rspack.config.mjs's
-    // optimization.minimize: true is mandatory there (a sibling config file
-    // generated alongside this one, not a section of this file): with it
-    // off, per-chunk cost is understated by orders of magnitude and the
-    // benchmark measures the wrong thing.
-    minify: true,
+    // Build-time levers, identical in meaning and default to the ones in the
+    // sibling rspack config: minify on, source maps off unless asked. Kept in
+    // lockstep so a cross-tool comparison never varies a factor on one side.
+    //
+    // Minification is mandatory in the default configuration, for the same
+    // reason rspack.config.mjs's optimization.minimize is: with it off,
+    // per-chunk cost is understated by orders of magnitude and the benchmark
+    // measures the wrong thing. BENCH_MINIFY=0 exists only to size that
+    // effect deliberately.
+    minify: process.env.BENCH_MINIFY !== '0',
+    // Off by default; see the sibling config for what turning it on measures.
+    sourcemap: process.env.BENCH_SOURCEMAP === '1',
     target: 'es2022',
     // Vite must write real output to disk here, exactly like rspack's
     // output.clean: true build does. build.emptyOutDir is deliberately left
