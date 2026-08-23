@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "benchmark": "node ./scripts/benchmark.ts",
-    "build:cases": "node ./scripts/build-rspack-cases.ts"
+    "build:cases": "node ./scripts/build-rspack-cases.ts",
+    "generate": "node scripts/generate-all.mjs",
+    "test": "node --test"
   },
   "devDependencies": {
     "@farmfe/cli": "^1.0.5",
