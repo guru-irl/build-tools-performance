@@ -1,0 +1,7 @@
+import React from 'react';
+const LABEL_35683 = 'component_35683';
+export function Component35683({ value = 35683, children }) {
+  const derived = React.useMemo(() => ({ label: LABEL_35683, value, doubled: value * 2 }), [value]);
+  return React.createElement('div', { className: LABEL_35683, 'data-value': derived.doubled }, children);
+}
+export default Component35683;

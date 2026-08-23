@@ -1,0 +1,13 @@
+{
+  "name": "m50k-c1k",
+  "version": "0.0.0",
+  "scripts": {
+    "build:rspack": "rspack build",
+    "build:vite": "vite build"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "browserslist": "Chrome >= 93"
+}

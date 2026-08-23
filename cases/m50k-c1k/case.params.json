@@ -1,0 +1,9 @@
+{
+  "name": "m50k-c1k",
+  "seed": 1,
+  "targetModules": 50000,
+  "targetChunks": 1000,
+  "routes": 300,
+  "modulesPerVendor": 4,
+  "collisionVendors": 0
+}
