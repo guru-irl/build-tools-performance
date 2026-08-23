@@ -655,6 +655,26 @@ export function selfExcludedPaths() {
   return [...SELF_PATHS];
 }
 
+// execFileSync's own default maxBuffer is 1MB -- comfortably enough for an
+// ordinary diff, but this checker's own `cases/` directory alone can hold
+// tens of thousands of files (see Task 8), and a `git diff --name-only`
+// listing that many paths routinely exceeds 1MB of raw text. Measured
+// directly this session: staging a single ~50,000-file generated case took
+// this repo's real `git diff --name-only --diff-filter=ACMRT <base>` output
+// past 2.4MB. Node's execFileSync throws ENOBUFS once output exceeds
+// maxBuffer, and the catch below (needed so a ref that genuinely does not
+// resolve is treated as a benign null, not a crash -- see the comment it
+// carries) swallowed that failure identically, so listScanTargets silently
+// returned an EMPTY scope instead of the real file list: the single worst
+// failure mode this checker can have, a large diff scanned as if it were
+// zero files, with "public-safety check: CLEAN" printed regardless of what
+// those files actually contained (reproduced directly this session, and see
+// the regression test this fix adds to test/safety.test.mjs). 256MB is far
+// beyond any realistic diff size for this repo (a full `--all` scan of every
+// tracked file, cases/ included, is well under 10MB of path text) and costs
+// nothing when unused -- it only bounds a pathological/runaway case.
+const GIT_MAX_BUFFER = 256 * 1024 * 1024;
+
 function tryGit(args, cwd) {
   try {
     // stdio is explicit here (not just `encoding`) so that a failing git
@@ -663,7 +683,9 @@ function tryGit(args, cwd) {
     // is discarded, not forwarded through to this process's own stderr --
     // that leak previously reached the CLI's real output on every probed-
     // and-rejected base-ref candidate (see M3). stdin is also not needed.
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync('git', args, {
+      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: GIT_MAX_BUFFER,
+    }).trim();
   } catch {
     return null;
   }

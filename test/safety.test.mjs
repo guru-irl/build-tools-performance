@@ -944,6 +944,51 @@ test('listScanTargets includes this fork\'s own changed files (e.g. .gitignore, 
   }
 });
 
+test('listScanTargets does not silently collapse to an empty scope when a large diff exceeds execFileSync\'s default 1MB stdout buffer', () => {
+  // Real incident, this session (Task 8): once a generated case with tens of
+  // thousands of files was staged, `git diff --name-only --diff-filter=ACMRT
+  // <base>` produced over 2MB of path text -- more than Node's execFileSync
+  // default maxBuffer (1MB) -- so the underlying process failed with
+  // ENOBUFS. tryGit's blanket `catch { return null }` (needed elsewhere so a
+  // ref that genuinely does not exist, e.g. in resolveBaseRef's "nothing
+  // resolves" case, is treated as a benign null rather than a crash)
+  // swallowed that failure identically, so listScanTargets silently returned
+  // an EMPTY scope instead of throwing or warning. That is the single worst
+  // failure mode a safety checker can have: a 60,000-file diff scanned as if
+  // it were zero files, with `public-safety check: CLEAN` printed regardless
+  // of what those files actually contained. Reproduced directly this
+  // session against this exact repo state before the fix (targets.length
+  // was 0, not the real ~60,000).
+  //
+  // This reproduces the same shape -- many changed paths, comfortably over
+  // 1MB of raw diff text -- at a scale small enough to run quickly: 8,000
+  // files with a padded name land the raw `git diff --name-only` output at
+  // 1,528,000 bytes (measured), ~46% over the 1MB default, so this fails on
+  // the old code for the same reason the real 60,000-file case did, not
+  // because of a coincidentally-similar but different limit.
+  const dir = mkdtempSync(path.join(process.cwd(), '.tmp-safety-bigdiff-'));
+  try {
+    initBaseAndFeatureBranch(dir);
+    const bulkDir = path.join(dir, 'bulk');
+    mkdirSync(bulkDir, { recursive: true });
+    const PADDING = 'x'.repeat(170);
+    const FILE_COUNT = 8000;
+    for (let i = 0; i < FILE_COUNT; i++) {
+      writeFileSync(path.join(bulkDir, `file-${String(i).padStart(5, '0')}-${PADDING}.txt`), 'x');
+    }
+    git([...GOOD_IDENTITY, 'add', '.'], dir);
+    git([...GOOD_IDENTITY, 'commit', '-q', '-m', 'test: add enough files to exceed the 1MB diff buffer'], dir);
+
+    const targets = listScanTargets({ cwd: dir });
+    assert.equal(
+      targets.length, FILE_COUNT,
+      `expected all ${FILE_COUNT} changed files to be in scope, got ${targets.length} -- a large diff must never silently collapse to an empty scope`
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 
 
 // --- Commit metadata: author/committer identity + commit message. --------
