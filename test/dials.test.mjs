@@ -212,3 +212,59 @@ test('every advertised plugin category is registered and builds', async () => {
     }
   }
 });
+
+test('BENCH_CACHE_GROUPS adds exactly N cacheGroups and defaults to none', async () => {
+  const a = mkdtempSync(path.join(process.cwd(), '.tmp-dial-'));
+  const b = mkdtempSync(path.join(process.cwd(), '.tmp-dial-'));
+  try {
+    const off = await buildCase(SHAPE, a, { BENCH_CACHE_GROUPS: undefined });
+    const baseCount = Object.keys(off.cfg.optimization.splitChunks.cacheGroups).length;
+    const on = await buildCase(SHAPE, b, { BENCH_CACHE_GROUPS: '25' });
+    const onCount = Object.keys(on.cfg.optimization.splitChunks.cacheGroups).length;
+    assert.equal(onCount, baseCount + 25, `expected ${baseCount} + 25 cacheGroups, got ${onCount}`);
+  } finally {
+    rmSync(a, { recursive: true, force: true });
+    rmSync(b, { recursive: true, force: true });
+  }
+});
+
+test('cacheGroup dial isolates evaluation cost: it must never form a chunk', async () => {
+  // The dial exists to measure the cost of ASKING, so its groups must match
+  // nothing. If one ever matched, it would form chunks and the dial would be
+  // changing the graph it is supposed to hold fixed -- confounding every
+  // measurement taken with it.
+  for (const kind of ['regex', 'function']) {
+    const dir = mkdtempSync(path.join(process.cwd(), '.tmp-dial-'));
+    try {
+      const { json, shape } = await buildCase(SHAPE, dir, {
+        BENCH_CACHE_GROUPS: '30',
+        BENCH_CACHE_GROUP_TESTS: kind,
+      });
+      // Assert the predicted VALUE, not merely that two runs agree.
+      assert.equal(
+        json.chunks.length,
+        shape.totalChunks,
+        `${kind}: chunk count ${json.chunks.length} != predicted ${shape.totalChunks}`
+      );
+      const synthetic = json.chunks.filter((c) => (c.names ?? []).some((n) => String(n).includes('synthetic')));
+      assert.equal(synthetic.length, 0, `${kind}: synthetic cacheGroups must not form chunks`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('cacheGroup tests are distinct per group, so none can share one compiled pattern', async () => {
+  const dir = mkdtempSync(path.join(process.cwd(), '.tmp-dial-'));
+  try {
+    const { cfg } = await buildCase(SHAPE, dir, { BENCH_CACHE_GROUPS: '10' });
+    const groups = cfg.optimization.splitChunks.cacheGroups;
+    const sources = Object.keys(groups)
+      .filter((k) => k.startsWith('synthetic'))
+      .map((k) => String(groups[k].test));
+    assert.equal(sources.length, 10);
+    assert.equal(new Set(sources).size, 10, 'each generated group must have a distinct test');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

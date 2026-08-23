@@ -95,6 +95,46 @@ from 5.7% of the build to 63.4%, confirming that asset-stage cost scales with
 **emitted bytes** rather than module count. Adding loader work then brings
 `make` back up.
 
-Known remaining gaps: `optimize tree` and `emit` are still under-modelled
-relative to large real applications, and total build time is short of one by
-roughly a factor of three. Both are open.
+Known remaining gaps: `emit` is still under-modelled relative to large real
+applications, and total build time is short of one by roughly a factor of
+three. Both are open.
+
+## `BENCH_CACHE_GROUPS` — splitChunks test evaluation
+
+The third under-modelled phase was `optimize tree`. rspack does not expose
+`optimizeChunks` as a JS hook, so chunk splitting is folded into that window,
+which made it the natural suspect.
+
+Every cacheGroup's `test` is evaluated against every module, so N groups on an
+M-module graph is N×M evaluations before a single chunk is formed. Large
+applications accumulate cacheGroups steadily — one per vendor to isolate, one
+per route to split — and it is easy to reach three digits without anyone
+deciding to.
+
+`BENCH_CACHE_GROUPS=<n>` adds n groups whose tests **match nothing**, so chunk
+count is unchanged and the only thing measured is the cost of asking.
+`BENCH_CACHE_GROUP_TESTS` selects how the question is asked: `regex` (default),
+which the bundler evaluates natively, or `function`, a JS predicate that must
+cross into JavaScript once per module per group.
+
+Measured on an 80,001-module / 5,000-chunk case:
+
+| configuration | optimize tree | marginal |
+|---|---|---|
+| no extra groups | 1.3 s | — |
+| 120 groups, `regex` tests | 5.0 s | +3.7 s |
+| 120 groups, `function` tests | **17.5 s** | **+16.2 s** |
+
+**A JS-function cacheGroup test costs about 4.4× a regex one.** Both ask the
+same question and both answer "no" for every module; the difference is purely
+that one answer is computed in JavaScript. At 120 groups over 80,000 modules
+that is roughly 9.6 million evaluations, which is why a phase that does no
+visible work can still take double-digit seconds.
+
+Practical consequence: a cacheGroup written as a predicate function — often
+reached for because it can consult the module graph — is not a like-for-like
+replacement for a regex. If a group can be expressed as a pattern, expressing
+it as a function is a measurable tax paid on every module in the build.
+
+This dial is rspack-only; Rolldown has no cacheGroups equivalent, so a
+cross-tool comparison is not meaningful here and none is reported.

@@ -437,6 +437,37 @@ if (pluginSpec) {
   assetPlugins = [new mod.SyntheticAssetPlugin()];
 }
 
+// Extra splitChunks cacheGroups, off unless BENCH_CACHE_GROUPS is set.
+//
+// Every cacheGroup's \`test\` is evaluated against every module, so N groups on
+// an M-module graph is N*M evaluations before a single chunk is formed. This
+// dial isolates that evaluation cost: the generated groups are written to match
+// NOTHING, so chunk count is unchanged and the only thing measured is the cost
+// of asking.
+//
+// BENCH_CACHE_GROUP_TESTS selects how the question is asked:
+//   'regex'    (default) a RegExp, which the bundler can evaluate natively
+//   'function' a JS predicate, which must cross into JavaScript per module
+// The difference between those two is the point of the dial.
+const extraGroupCount = Number(process.env.BENCH_CACHE_GROUPS || 0);
+const groupTestKind = process.env.BENCH_CACHE_GROUP_TESTS || 'regex';
+const extraCacheGroups = {};
+for (let i = 0; i < extraGroupCount; i++) {
+  extraCacheGroups['synthetic' + i] = {
+    // Distinct per group so no engine-level regex cache can serve them all
+    // from one compiled pattern, which would flatten the very curve being
+    // measured.
+    test:
+      groupTestKind === 'function'
+        ? (module) => (module.resource || '').includes('__never_matches_' + i + '__')
+        : new RegExp('__never_matches_' + i + '__'),
+    chunks: 'all',
+    minSize: 0,
+    minChunks: 1,
+    priority: -100 - i,
+  };
+}
+
 export default {
   mode: 'production',
   context: __dirname,
@@ -488,6 +519,7 @@ export default {
         // differently-shaped chunks.
         default: false,
         defaultVendors: false,
+        ...extraCacheGroups,
         vendorCliques: {
           test: /[\\\\/]vendors[\\\\/]/,
           chunks: 'all',
