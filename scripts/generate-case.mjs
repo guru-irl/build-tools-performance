@@ -437,6 +437,23 @@ if (pluginSpec) {
   assetPlugins = [new mod.SyntheticAssetPlugin()];
 }
 
+// Minifier selection, off unless BENCH_MINIFIER is set.
+//
+// Applications do not all use the bundler's built-in minifier, and swapping it
+// is a load-bearing decision that deserves a measurement. When 'oxc' is chosen
+// the built-in is turned OFF and a plugin takes over the same processAssets
+// stage, so the two are measured doing the same job at the same point rather
+// than stacked on top of each other.
+const minifierMod = await import(pathToFileURL(findUp(path.join('scripts', 'minifier-select.mjs'))).href);
+const minifierChoice = minifierMod.minifierFromEnv();
+const useOxc = minifierChoice === 'oxc';
+if (useOxc) {
+  assetPlugins = [
+    ...assetPlugins,
+    new minifierMod.OxcMinifyPlugin({ sourcemap: process.env.BENCH_SOURCEMAP === '1' }),
+  ];
+}
+
 // Extra splitChunks cacheGroups, off unless BENCH_CACHE_GROUPS is set.
 //
 // Every cacheGroup's \`test\` is evaluated against every module, so N groups on
@@ -503,7 +520,15 @@ export default {
     // per-chunk cost is understated by orders of magnitude and the benchmark
     // measures the wrong thing. BENCH_MINIFY=0 exists only to size that
     // effect deliberately, never to make the benchmark look fast.
-    minimize: process.env.BENCH_MINIFY !== '0',
+    // Minification is mandatory in published cases for the same reason
+    // vite.config.mjs's build.minify is: with it off, the asset stage barely
+    // runs and the benchmark measures the wrong thing. BENCH_MINIFY=0 exists
+    // only to size that effect.
+    //
+    // When BENCH_MINIFIER=oxc the built-in is disabled so the oxc plugin is the
+    // only minifier running -- otherwise both would run and the measurement
+    // would be the cost of minifying twice.
+    minimize: useOxc ? false : process.env.BENCH_MINIFY !== '0',
     splitChunks: {
       chunks: 'all',
       // minSize: 0 is required at both levels below. A nonzero minSize
