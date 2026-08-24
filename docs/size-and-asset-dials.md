@@ -138,3 +138,76 @@ it as a function is a measurable tax paid on every module in the build.
 
 This dial is rspack-only; Rolldown has no cacheGroups equivalent, so a
 cross-tool comparison is not meaningful here and none is reported.
+
+## `BENCH_MINIFIER` — which minifier does the work
+
+A bundler's built-in minifier is not the only option, and swapping it is a
+common decision. `BENCH_MINIFIER` makes the choice explicit:
+
+| value | behaviour |
+|---|---|
+| unset | the bundler's own default (currently SWC-based) |
+| `swc` | the built-in, stated explicitly — byte-identical to unset |
+| `oxc` | the standalone oxc minifier, run as a plugin at the same `processAssets` stage (400) a built-in minifier uses |
+
+Selecting `oxc` turns the built-in **off**, so the two are measured doing the
+same job at the same point rather than one running on top of the other.
+
+Measured on ~7.5 MB of pre-minify JS, per byte of **input handed to the
+minifier**, single chunk:
+
+| shape | swc ms/MB | oxc ms/MB | swc shrink | oxc shrink |
+|---|---|---|---|---|
+| flat arithmetic | 87.7 | 30.4 | 54% | 32% |
+| many identifiers | 38.3 | 16.4 | 90% | 82% |
+| nested scopes | 59.8 | 17.6 | 96% | 75% |
+| string tables | 6.4 | 3.3 | 100% | 5% |
+
+**oxc is 2.9–3.4× faster on every shape but compresses substantially less.**
+Neither half of that tradeoff is visible if the minifier is left implicit.
+
+**Minifier cost per byte varies ~14× with the shape of the code.** String
+tables are nearly free; flat arithmetic is the most expensive. This is the
+companion result to `moduleBytes`: byte count sets the scale, code shape sets
+the rate.
+
+### Two ways to get this comparison wrong
+
+**Denominator.** Cost per *post-minify* byte flatters whichever minifier
+compresses least; cost per *dist* byte flatters whichever emits less
+source-map data. Every figure above is per byte of input. Getting this wrong
+is not a rounding error — it inflated an earlier version of these numbers by
+roughly 7×.
+
+**Asset count.** The oxc lever is a JavaScript plugin, so it pays the per-asset
+boundary cost documented above. At one chunk oxc wins by 3×; in a
+2,500-chunk case it measured 26.0 ms/MB against the built-in's 11.8 — the
+ordering **reverses**. A minifier cannot be evaluated independently of how many
+assets it is handed.
+
+## Configuring a case to resemble a large application
+
+The dials are independent, so they can be set to match a measured target:
+
+```
+moduleBytes: 7000            # match the target's bytes per module
+BENCH_LOADER=transform-native # model a per-module TS/JSX transform
+BENCH_MINIFIER=oxc            # match the target's minifier
+BENCH_SOURCEMAP=1             # maps are usually on in production
+```
+
+Measured against one large application, with module size controlled at ~7 KB
+per module on both sides:
+
+| configuration | make ms/module | minify ms/input MB |
+|---|---|---|
+| defaults | 0.024 | 11.8 |
+| + oxc | 0.023 | 26.0 |
+| + oxc + transform loader | 0.132 | 27.5 |
+| the application | 0.488 | 65.3 |
+
+The transform loader is what moves `make` — 5.5× on its own — because the
+default case runs **no loader at all**, while a real application transforms
+every module. The residual gap is roughly 3.7× on `make` and 2.5× on `minify`,
+and is not yet explained; deeper module resolution and multiple loaders per
+module are the leading candidates.
