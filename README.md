@@ -27,6 +27,143 @@ Tooling details:
 - webpack is configured to use SWC instead of Babel / Terser.
 - Vite uses Rolldown and Oxc.
 
+## Synthetic scaling benchmark (added in this fork)
+
+The cases above answer "how fast is each tool on this app?". This fork adds a
+separate, generated benchmark that answers a different question: **which
+property of an application is a given build stage actually charging for?**
+
+The upstream cases vary as a bundle — more modules also means more chunks, more
+bytes and more plugins — so a slower build cannot be attributed to any one
+cause. The generator here makes each property an **independent dial**, so one
+can be moved while the others are held fixed. Synthetic cases target **rspack
+and Vite**.
+
+### Generating a case
+
+```js
+import { generateCase } from './scripts/generate-case.mjs';
+
+generateCase({
+  targetModules: 50000,   // module graph size
+  targetChunks: 5000,     // output chunk count, independent of modules
+  routes: 300,
+  modulesPerVendor: 4,
+  moduleBytes: 7000,      // bytes per module, independent of both
+}, 'cases/my-case');
+```
+
+Chunk and module counts are **exact, not approximate**:
+
+```
+chunks  = D + R + 1              D = distinct vendor cliques, R = routes
+modules = D*k + A + R + 1        k = modules per vendor, A = app components
+```
+
+### Dials
+
+All are off by default, and an unset variable reproduces published numbers
+exactly — asserted by tests, not assumed.
+
+| dial | what it varies | stage it moves |
+|---|---|---|
+| `targetModules` | module graph size | make |
+| `targetChunks` | output chunk count | optimize tree, emit |
+| `moduleBytes` | bytes per module | processAssets |
+| `BENCH_LOADER` | per-module loader work — 9 categories | make |
+| `BENCH_LOADER_PASSES` | loader chain depth | make |
+| `BENCH_PLUGIN` | per-asset plugin work — 4 categories | processAssets |
+| `BENCH_CACHE_GROUPS` | splitChunks cacheGroup count | optimize tree |
+| `BENCH_CACHE_GROUP_TESTS` | `regex` or `function` cacheGroup tests | optimize tree |
+| `BENCH_MINIFIER` | `swc` (built-in) or `oxc` | processAssets |
+| `BENCH_SOURCEMAP` / `BENCH_MINIFY` | source maps / minification | processAssets |
+| `BENCH_HEAP_MB` | Node heap ceiling for large cases | — |
+
+Loader categories: `noop`, `cpu:<n>`, `regex`, `parse-native`, `parse-js`,
+`transform-native`, `transform-js`, `async:<ms>`, `emit:<n>`.
+Plugin categories: `asset-scan`, `asset-rewrite`, `asset-transform`,
+`asset-summarize`, each registered at the `processAssets` stage it models.
+
+### What has been measured
+
+Each stage responds to essentially **one** dial. The non-relationships are
+results too — `make` moves only 1.30 → 1.36 s across a 20× chunk increase, and
+`processAssets` shows R² = 0.07 against chunk count.
+
+| stage | driver | law | R² |
+|---|---|---|---|
+| make | modules | 31.1 ms per 1k modules | 0.994 |
+| optimize tree | chunks | 318 ms per 1k chunks | 0.985 |
+| optimize tree | cacheGroups | 18.0 ms/group (regex), 78.5 ms/group (function) | 1.000 |
+| processAssets | emitted bytes | 6.3 ms per MB | 0.994 |
+| emit | assets + bytes | 0.056 ms/asset + 8.7 ms/MB | 0.985 |
+
+Other findings, each with the measurement behind it in `docs/`:
+
+- **A JS-function cacheGroup test costs ~4.4× a regex one** for the same answer
+  on every module — 3.7 s vs 16.2 s for 120 groups over 80,001 modules.
+- **Emitting assets is the most expensive loader category** (+169% rspack,
+  +171% Vite), beating any parse or transform.
+- **Native is not automatically cheaper than JS**: `parse-native` (55.8
+  µs/module) loses to `parse-js` (45.4), while `transform-native` (51.2) beats
+  `transform-js` (58.2). Cost tracks how much data crosses the JS/native
+  boundary, not which language did the work.
+- **Per-asset plugin cost is boundary cost, not work.** A plugin that reads and
+  rewrites every asset costs no more than one that only reads them; the work
+  itself is under 1 ms. The win is touching fewer assets, not doing less per
+  asset.
+- **Minifier cost per byte varies ~14× with code shape.** String tables are
+  nearly free; flat arithmetic is the most expensive.
+- **oxc is 2.9–3.4× faster than the built-in minifier but compresses
+  substantially less** — and the ordering **reverses** at high asset counts,
+  where per-asset boundary cost dominates.
+- **Dead code is not free.** Unreferenced module-local functions are *not*
+  dropped: filler that was never called still grew output from 198 KB to
+  1,943 KB (vs 2,570 KB when reachable).
+
+Cross-tool, on the chunk axis with modules fixed at 50k: rspack **+400 ms per
+1,000 chunks** (R² = 0.987) against Vite's **+279 ms** (R² = 0.991), with
+per-chunk cost superlinear for both. On the module axis the two are nearly
+parallel — **rspack's disadvantage is chunk-driven, not module-driven**.
+
+### Running the analyses
+
+```bash
+node scripts/bench.mjs          # the scaling grid
+node scripts/bench-levers.mjs   # source maps x minification
+node scripts/bench-loaders.mjs  # marginal cost per loader category
+node scripts/generate-all.mjs   # regenerate every committed case
+```
+
+Results are written to `docs/results/` as CSV **and** JSON before any chart is
+drawn, so a plot can never be the only record of a number.
+
+### Docs
+
+| document | contents |
+|---|---|
+| [`docs/design/synthetic-chunk-scaling.md`](docs/design/synthetic-chunk-scaling.md) | how the generator controls chunk and module counts exactly |
+| [`docs/loader-taxonomy.md`](docs/loader-taxonomy.md) | loader categories and measured per-module costs |
+| [`docs/size-and-asset-dials.md`](docs/size-and-asset-dials.md) | module size, asset-stage plugins, cacheGroups, minifier selection |
+| [`docs/results/README.md`](docs/results/README.md) | published scaling results and charts |
+| [`docs/public-safety.md`](docs/public-safety.md) | the pre-publication checker |
+
+### Tests and public safety
+
+```bash
+node --test "test/*.test.mjs"       # 171 tests
+node scripts/check-public-safety.mjs
+```
+
+Tests build **real bundles** and assert on emitted output rather than on the
+generator's own return values — generator-only assertions previously stayed
+green through a collapsed chunk axis and a fully tree-shaken app. Every guard
+is RED-proved: the mechanism is deliberately corrupted and the suite must fail.
+
+`check-public-safety.mjs` is **allowlist-based**: it flags anything that does
+not match known-good patterns, rather than scanning for a list of forbidden
+words. It also scans commit metadata, not just files.
+
 ## Results
 
 > Data from GitHub Actions: https://github.com/rstackjs/build-tools-performance/actions/runs/31916976843 (2026-08-18)
